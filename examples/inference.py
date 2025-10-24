@@ -12,7 +12,8 @@ from PIL import Image
 import argparse
 from torchvision import transforms
 
-# Add parent directory to path
+# Add parent directory to path for standalone execution
+# Note: For production use, install the package with `pip install -e .`
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import DDUNet

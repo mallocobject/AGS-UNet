@@ -20,7 +20,8 @@ from torch.utils.data import DataLoader, Dataset
 import numpy as np
 from PIL import Image
 
-# Add parent directory to path
+# Add parent directory to path for standalone execution
+# Note: For production use, install the package with `pip install -e .`
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import DDUNet
@@ -33,6 +34,13 @@ class SyntheticDataset(Dataset):
     def __init__(self, num_samples=50, image_size=256):
         self.num_samples = num_samples
         self.image_size = image_size
+        
+        # Pre-create coordinate grids for efficiency
+        self.y, self.x = torch.meshgrid(
+            torch.arange(self.image_size), 
+            torch.arange(self.image_size), 
+            indexing='ij'
+        )
     
     def __len__(self):
         return self.num_samples
@@ -41,7 +49,7 @@ class SyntheticDataset(Dataset):
         # Create random image
         image = torch.randn(3, self.image_size, self.image_size)
         
-        # Create synthetic mask (random circles and rectangles)
+        # Create synthetic mask (random circles)
         mask = torch.zeros(1, self.image_size, self.image_size)
         
         # Add random shapes
@@ -49,8 +57,7 @@ class SyntheticDataset(Dataset):
             # Random circle
             cx, cy = np.random.randint(0, self.image_size, 2)
             radius = np.random.randint(10, 40)
-            y, x = torch.meshgrid(torch.arange(self.image_size), torch.arange(self.image_size), indexing='ij')
-            circle = ((x - cx) ** 2 + (y - cy) ** 2) <= radius ** 2
+            circle = ((self.x - cx) ** 2 + (self.y - cy) ** 2) <= radius ** 2
             mask[0][circle] = 1.0
         
         return image, mask

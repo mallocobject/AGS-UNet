@@ -17,6 +17,8 @@ Key features:
 
 ## Installation
 
+### From Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/mallocobject/DDU-Net.git
@@ -24,6 +26,15 @@ cd DDU-Net
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Optional: Install package in development mode for proper imports
+pip install -e .
+```
+
+### Using pip (future)
+
+```bash
+pip install ddu-net
 ```
 
 ## Requirements

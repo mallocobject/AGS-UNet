@@ -11,7 +11,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import argparse
 
-# Add parent directory to path
+# Add parent directory to path for standalone execution
+# Note: For production use, install the package with `pip install -e .`
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import DDUNet
