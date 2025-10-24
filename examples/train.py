@@ -5,10 +5,14 @@ This script demonstrates how to train the DDU-Net model on a segmentation datase
 """
 
 import os
+import sys
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import argparse
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import DDUNet
 from utils import SegmentationDataset, Trainer, get_default_transforms

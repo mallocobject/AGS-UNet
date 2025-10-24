@@ -5,11 +5,15 @@ This script demonstrates how to use a trained DDU-Net model for inference.
 """
 
 import os
+import sys
 import torch
 import numpy as np
 from PIL import Image
 import argparse
 from torchvision import transforms
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import DDUNet
 

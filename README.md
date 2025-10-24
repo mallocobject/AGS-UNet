@@ -39,6 +39,30 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Quick Demo
+
+Run the demo script to see basic model usage:
+
+```bash
+python demo.py
+```
+
+This will demonstrate:
+- Model creation and parameter counting
+- Forward pass with different input sizes
+- Different model configurations
+- Multi-class segmentation
+
+### Quick Start Training Example
+
+For a complete end-to-end example with a synthetic dataset:
+
+```bash
+python examples/quick_start.py
+```
+
+This demonstrates the full pipeline including training, validation, and making predictions.
+
 ### Training
 
 ```python
