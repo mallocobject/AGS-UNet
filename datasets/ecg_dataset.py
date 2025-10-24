@@ -5,7 +5,7 @@ import numpy as np
 import wfdb
 
 
-class MITNSTDBDataset(Dataset):
+class ECGDataset(Dataset):
     def __init__(
         self,
         mitdb_dir,
@@ -16,7 +16,7 @@ class MITNSTDBDataset(Dataset):
         snr_db=0,
         split="train",
         val_ratio=0.1,
-        test_subjects=None,
+        test_records=None,
         seed=42,
     ):
         super().__init__()
@@ -28,10 +28,10 @@ class MITNSTDBDataset(Dataset):
 
         # ========= 训练 / 测试划分 =========
         if split == "test":
-            assert test_subjects is not None
-            record_names = test_subjects
-        elif split in ["train", "val"] and test_subjects is not None:
-            record_names = [r for r in record_names if r not in test_subjects]
+            assert test_records is not None
+            record_names = test_records
+        elif split in ["train", "val"] and test_records is not None:
+            record_names = [r for r in record_names if r not in test_records]
 
         # ========= 读取干净信号 =========
         self.clean_segments = []
@@ -54,8 +54,6 @@ class MITNSTDBDataset(Dataset):
         self.noises = []
         for nt in noise_types:
             path = os.path.join(nstdb_dir, nt)
-            if not os.path.exists(path + ".hea"):
-                raise FileNotFoundError(f"Missing file: {path}.hea or .dat")
             rec = wfdb.rdrecord(os.path.join(nstdb_dir, nt))
             n_sig = rec.p_signal[:, 0]
             self.noises.append(n_sig)
@@ -106,16 +104,16 @@ if __name__ == "__main__":
     mitdb_dir = "./ECG-Data/mitdb"
     nstdb_dir = "./ECG-Data/nstdb"
     records = ["100", "101", "102", "103", "104"]
-    test_subjects = ["105"]
+    test_records = ["105"]
 
-    train_set = MITNSTDBDataset(
-        mitdb_dir, nstdb_dir, records, split="train", test_subjects=test_subjects
+    train_set = ECGDataset(
+        mitdb_dir, nstdb_dir, records, split="train", test_records=test_records
     )
-    val_set = MITNSTDBDataset(
-        mitdb_dir, nstdb_dir, records, split="val", test_subjects=test_subjects
+    val_set = ECGDataset(
+        mitdb_dir, nstdb_dir, records, split="val", test_records=test_records
     )
-    test_set = MITNSTDBDataset(
-        mitdb_dir, nstdb_dir, records, split="test", test_subjects=test_subjects
+    test_set = ECGDataset(
+        mitdb_dir, nstdb_dir, records, split="test", test_records=test_records
     )
 
     train_loader = DataLoader(train_set, batch_size=32, shuffle=True)

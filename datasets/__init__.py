@@ -1,1 +1,1 @@
-from .mitnstdb import MITNSTDBDataset
+from .ecg_dataset import ECGDataset
