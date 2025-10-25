@@ -9,7 +9,7 @@ class DRNN(nn.Module):
         self.relu_layers = nn.ModuleList(
             [nn.Sequential(nn.Linear(256, 256), nn.ReLU()) for _ in range(num_relus)]
         )
-        self.fc3 = nn.Linear(256, 1024)
+        self.fc3 = nn.Linear(256, 3600)
 
     def forward(self, x):
         if x.dim() == 2:
@@ -24,7 +24,7 @@ class DRNN(nn.Module):
 
 if __name__ == "__main__":
     model = DRNN(2)
-    x = torch.randn(4, 1024)  # batch=4, 长度1024
+    x = torch.randn(4, 3600)  # batch=4, 长度1024
     print(model)
     y = model(x)
 

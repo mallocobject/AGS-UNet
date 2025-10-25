@@ -1,0 +1,12 @@
+accelerate launch --config_file ./config.yaml run.py \
+    --split_dir ./data_split \
+    --model DDUNet \
+    --batch_size 32 \
+    --epochs 100 \
+    --lr 1e-3 \
+    --regularizer 1e-5 \
+    --betas 0.9 0.99 \
+    --patience 10 \
+    --save_checkpoint ./checkpoints/best_ddunet.pth \
+    --load_checkpoint ./checkpoints/best_ddunet.pth \
+    --mode train \

@@ -12,7 +12,7 @@ import layers
 
 
 # DRSN-Demucs U-Net
-class DDUnet(nn.Module):
+class DDUNet(nn.Module):
     def __init__(
         self,
         chin: int = 1,  # 仅时域
@@ -110,7 +110,7 @@ class DDUnet(nn.Module):
 
 
 if __name__ == "__main__":
-    model = DDUnet()
+    model = DDUNet()
     print(model)
     x = torch.randn(100, 3600)
     y = model(x)
