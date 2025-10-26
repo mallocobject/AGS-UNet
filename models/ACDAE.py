@@ -59,7 +59,7 @@ class ACDAE(nn.Module):
     def __init__(self) -> None:
         super(ACDAE, self).__init__()
 
-        channels = [1, 8, 16, 32, 64]
+        channels = [1, 16, 32, 64, 128]
         Kernal_Size = [13, 7, 7, 7]
         self.EncList = nn.ModuleList()
         self.DecList = nn.ModuleList()
