@@ -2,45 +2,27 @@ import torch
 import torch.nn as nn
 
 
-class PositionalEncoding1D(nn.Module):
-    def __init__(self, d_model, max_len=5000):
-        super(PositionalEncoding1D, self).__init__()
+class AbsPositionalEncoding(nn.Module):
+    """Absolute Position embedding for Transformer"""
 
-        # 创建位置编码矩阵 [max_len, d_model]
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(
-            torch.arange(0, d_model, 2).float()
-            * (-torch.log(torch.tensor(10000.0)) / d_model)
+    def __init__(self, num_hiddens, dropout=0.0, max_len=1000):
+        super(AbsPositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(dropout)
+        # generate a P matrix with shape of (1, max_len, num_hiddens)
+        self.P = torch.zeros((1, max_len, num_hiddens))
+        X = torch.arange(max_len, dtype=torch.float32).reshape(-1, 1) / torch.pow(
+            10000, torch.arange(0, num_hiddens, 2, dtype=torch.float32) / num_hiddens
         )
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        self.P[:, :, 0::2] = torch.sin(X)
+        self.P[:, :, 1::2] = torch.cos(X)
 
-        # 注册为缓冲区，形状为 [1, max_len, d_model]
-        self.register_buffer("pe", pe.unsqueeze(0))
-
-    def forward(self, x):
-
-        seq_len = x.size(1)
-        x = x + self.pe[:, :seq_len, :]
-
-        return x
+    def forward(self, X):
+        X = X + self.P[:, : X.shape[1], :].to(X.device)
+        return self.dropout(X)
 
 
-# 测试代码
 if __name__ == "__main__":
-    d_model = 16
-    max_len = 60
-    pe = PositionalEncoding1D(d_model, max_len)
-
-    # 测试 batch_first 格式
-    x1 = torch.zeros(10, 60, d_model)  # (batch_size, seq_len, d_model)
-    x1_with_pe = pe(x1)
-    print(f"batch_first 格式输入形状: {x1.shape}")
-    print(f"batch_first 格式输出形状: {x1_with_pe.shape}")
-
-    # 验证位置编码是否正确添加
-    print(f"位置编码形状: {pe.pe.shape}")
-    print(f"第一个批次，第一个位置的编码: {x1_with_pe[0, 0, :4]}")  # 显示前4个值
-    print(f"第二个批次，第一个位置的编码: {x1_with_pe[1, 0, :4]}")  # 应该相同
-    print(f"第一个批次，第二个位置的编码: {x1_with_pe[0, 1, :4]}")  # 应该不同
+    x = torch.randn(2, 256, 8)  # batch=2, seq_len=256, channels=8
+    pos_enc = AbsPositionalEncoding(num_hiddens=8, dropout=0.1, max_len=1000)
+    y = pos_enc(x)
+    print(y.shape)  # torch.Size([2, 256, 8])

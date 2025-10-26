@@ -39,8 +39,10 @@ class DRSNBlock(nn.Module):
                 nn.BatchNorm1d(DRSNBlock.expansion * chout),
             )
 
+        self.relu = nn.ReLU()
+
     def forward(self, x: torch.Tensor):
-        return nn.ReLU()(self.residual_function(x) + self.shortcut(x))
+        return self.relu(self.residual_function(x) + self.shortcut(x))
 
 
 if __name__ == "__main__":

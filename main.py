@@ -69,7 +69,7 @@ device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
 def validate_model(model: nn.Module, val_loader: DataLoader):
     model.eval()
     val_loss = 0.0
-    metrics_sum = {"RMSE": 0.0, "PRD": 0.0, "SNRI": 0.0}
+    metrics_sum = {"RMSE": 0.0, "PRD": 0.0, "SNR": 0.0}
     num_batches = 0
 
     criterion = nn.MSELoss()
@@ -103,7 +103,7 @@ def test_model(
     test_metrics = validate_model(model, test_loader)
     print(
         f"Test Results - Loss: {test_metrics['loss']:.4f}, RMSE: {test_metrics['RMSE']:.4f}, "
-        f"PRD: {test_metrics['PRD']:.4f}, SNRI: {test_metrics['SNRI']:.4f}"
+        f"PRD: {test_metrics['PRD']:.4f}, SNR: {test_metrics['SNR']:.4f}"
     )
 
 
@@ -150,7 +150,7 @@ def train_model(
         print(
             f"Epoch {epoch+1}/{num_epochs}, Train Loss: {epoch_loss:.4f}, "
             f"Val Loss: {val_loss:.4f}, RMSE: {val_metrics['RMSE']:.4f}, "
-            f"PRD: {val_metrics['PRD']:.4f}, SNRI: {val_metrics['SNRI']:.4f}"
+            f"PRD: {val_metrics['PRD']:.4f}, SNR: {val_metrics['SNR']:.4f}"
         )
 
         # scheduler.step()

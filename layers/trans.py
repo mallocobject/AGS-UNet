@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from .pos_encoding import PositionalEncoding1D
+from .pos_encoding import AbsPositionalEncoding
 
 
 class TransBlock1D(nn.Module):
@@ -11,7 +11,7 @@ class TransBlock1D(nn.Module):
         self.input_proj = nn.Linear(in_dim, embed_dim)
 
         # 位置编码
-        self.pos_encoding = PositionalEncoding1D(embed_dim, seq_length)
+        self.pos_encoding = AbsPositionalEncoding(embed_dim, seq_length)
 
         # Transformer 编码器层
         encoder_layer = nn.TransformerEncoderLayer(

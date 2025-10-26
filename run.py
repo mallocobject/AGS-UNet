@@ -23,25 +23,19 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=str,
-        default="DDUNet",
-        choices=["DDUNet", "FCNDAE1D", "TFTransUNet1D"],
+        default="UNet",
+        choices=["UNet", "ACDAE", "Seq2Seq2", "ralenet", "DTUNet"],
     )
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--regularizer", type=float, default=1e-5)
-    parser.add_argument("--betas", nargs=2, type=float, default=[0.9, 0.999])
     parser.add_argument(
-        "--patience", type=int, default=10, help="Early stopping patience"
+        "--noise_type", type=str, default="emb", choices=["bw", "em", "ma", "emb"]
     )
+    parser.add_argument("--snr", type=int, default=0, choices=[-4, -2, 0, 2, 4])
 
     # ====== 模型保存与加载 ======
-    parser.add_argument(
-        "--save_checkpoint", type=str, default="./checkpoints/best_model.pth"
-    )
-    parser.add_argument(
-        "--load_checkpoint", type=str, default="./checkpoints/best_model.pth"
-    )
+    parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints/")
 
     # ====== 模式选择 ======
     parser.add_argument("--mode", type=str, default="train", choices=["train", "test"])

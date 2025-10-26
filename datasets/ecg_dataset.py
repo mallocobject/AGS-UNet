@@ -6,13 +6,27 @@ import json
 
 
 class ECGDataset(Dataset):
-    def __init__(self, split="train", split_dir="./data_split"):
+    def __init__(
+        self,
+        split: str = "train",
+        noise_type: str = "bw",
+        snr: int = 0,
+        split_dir: str = "./data_split",
+    ):
         super().__init__()
         self.split = split
         self.split_dir = split_dir
+        self.noise_type = noise_type
+        self.snr = snr
+
+        if snr not in [-4, -2, 0, 2, 4]:
+            raise ValueError(f"Unsupported SNR level: {snr}")
+
+        if noise_type not in ["bw", "em", "ma", "emb"]:
+            raise ValueError(f"Unsupported noise type: {noise_type}")
 
         # 加载分割信息
-        split_path = os.path.join(split_dir, "split.json")
+        split_path = os.path.join(split_dir, "split_info.json")
         if not os.path.exists(split_path):
             raise FileNotFoundError(f"Split file not found: {split_path}")
 
@@ -22,15 +36,15 @@ class ECGDataset(Dataset):
         # 获取当前分割的索引
         if split == "train":
             self.indices = self.split_data["train_indices"]
-        elif split == "val":
-            self.indices = self.split_data["val_indices"]
         elif split == "test":
             self.indices = self.split_data["test_indices"]
         else:
             raise ValueError(f"Unknown split: {split}")
 
         # 加载数据文件
-        self.noisy_signals = np.load(os.path.join(split_dir, "noisy_signals.npy"))
+        self.noisy_signals = np.load(
+            os.path.join(split_dir, f"noisy_{noise_type}_snr{snr}.npy")
+        )
         self.clean_signals = np.load(os.path.join(split_dir, "clean_signals.npy"))
 
         print(f"Loaded {split} dataset with {len(self.indices)} samples")
@@ -57,16 +71,22 @@ class ECGDataset(Dataset):
 if __name__ == "__main__":
     # 测试数据集加载
     train_dataset = ECGDataset(split="train", split_dir="./data_split")
-    val_dataset = ECGDataset(split="val", split_dir="./data_split")
     test_dataset = ECGDataset(split="test", split_dir="./data_split")
 
     print(f"训练集大小: {len(train_dataset)}")
-    print(f"验证集大小: {len(val_dataset)}")
     print(f"测试集大小: {len(test_dataset)}")
 
     # 测试一个样本
     noisy, clean = train_dataset[0]
-    print(f"带噪声信号形状: {noisy.shape}")
-    print(f"干净信号形状: {clean.shape}")
-    print(f"带噪声信号范围: [{noisy.min():.4f}, {noisy.max():.4f}]")
-    print(f"干净信号范围: [{clean.min():.4f}, {clean.max():.4f}]")
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(12, 6))
+    plt.subplot(2, 1, 1)
+    plt.title("Noisy ECG Signal")
+    plt.plot(noisy.numpy())
+    plt.subplot(2, 1, 2)
+    plt.title("Clean ECG Signal")
+    plt.plot(clean.numpy())
+    plt.tight_layout()
+    plt.show()
+    print("样本加载成功")

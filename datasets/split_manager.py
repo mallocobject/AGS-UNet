@@ -11,19 +11,14 @@ class SplitManager:
         self,
         mitdb_dir: str,
         nstdb_dir: str,
-        window_size: int = 3600,
-        step_size: int = 3600,
+        window_size: int = 256,
         seed: int = 42,
     ):
         self.mitdb_dir = mitdb_dir
         self.nstdb_dir = nstdb_dir
         self.window_size = window_size
-        self.step_size = step_size
         self.seed = seed
         np.random.seed(seed)
-
-        self.clean = (None, None)
-        self.noisy = (None, None)
 
     def _get_all_records(self) -> List[str]:
         """获取所有记录文件名（不带扩展名）"""
@@ -32,239 +27,210 @@ class SplitManager:
         ]
 
     def _load_noise_segments(self) -> Dict[str, np.ndarray]:
-        """加载噪声片段，按类型分开存储"""
-        nstdb_files = ["bw", "ma", "em"]
+        """加载三种单一噪声类型: bw, em, ma"""
+        nstdb_files = ["bw", "em", "ma"]
         noise_segments = {}
 
-        for nt in nstdb_files:
-            segments = []
-            rec = wfdb.rdrecord(os.path.join(self.nstdb_dir, nt))
-            n_sig = rec.p_signal[:, 0]
-            for start in range(0, len(n_sig) - self.window_size, self.step_size):
-                seg = n_sig[start : start + self.window_size]
-                if len(seg) == self.window_size:
-                    segments.append(seg)
+        for noise_type in nstdb_files:
+            rec = wfdb.rdrecord(os.path.join(self.nstdb_dir, noise_type))
+            noise_signal = rec.p_signal[:, 0]
 
-            noise_segments[nt] = np.array(segments, dtype=np.float32)
-            print(f"Loaded {len(segments)} segments for noise type: {nt}")
+            # 随机采样10000个片段
+            segments = []
+            max_start = len(noise_signal) - self.window_size
+
+            for _ in range(10000):
+                start_idx = np.random.randint(0, max_start)
+                seg = noise_signal[start_idx : start_idx + self.window_size]
+                segments.append(seg)
+
+            noise_segments[noise_type] = np.array(segments, dtype=np.float32)
+            print(f"Loaded {len(segments)} segments for noise type: {noise_type}")
 
         return noise_segments
 
     def _load_clean_segments(self) -> np.ndarray:
-        """加载干净信号片段"""
+        """加载干净ECG信号片段"""
         records = self._get_all_records()
         clean_segments = []
 
-        for rid in records:
-            rec_path = os.path.join(self.mitdb_dir, rid)
-            record = wfdb.rdrecord(rec_path)
-            sig = record.p_signal[:, 0]
-            for start in range(0, len(sig) - self.window_size, self.step_size):
-                seg = sig[start : start + self.window_size]
-                if len(seg) == self.window_size:
-                    clean_segments.append(seg)
+        for record_id in records:
+            rec = wfdb.rdrecord(os.path.join(self.mitdb_dir, record_id))
+            ecg_signal = rec.p_signal[:, 0]
+
+            max_start = len(ecg_signal) - self.window_size
+            num_segments_per_record = max(1, len(ecg_signal) // (self.window_size * 10))
+
+            for _ in range(num_segments_per_record):
+                start_idx = np.random.randint(0, max_start)
+                seg = ecg_signal[start_idx : start_idx + self.window_size]
+                clean_segments.append(seg)
+
+        # 随机选择10000个片段
+        if len(clean_segments) > 10000:
+            indices = np.random.choice(len(clean_segments), 10000, replace=False)
+            clean_segments = [clean_segments[i] for i in indices]
+        elif len(clean_segments) < 10000:
+            # 如果样本不足，使用替换采样
+            indices = np.random.choice(len(clean_segments), 10000, replace=True)
+            clean_segments = [clean_segments[i] for i in indices]
 
         return np.array(clean_segments, dtype=np.float32)
 
-    def _normalize_signals(
-        self, signals: np.ndarray, stats: tuple, method: str = "zscore"
-    ) -> np.ndarray:
-        """归一化信号
+    def _calculate_snr_adjustment(
+        self, clean_signal: np.ndarray, noise: np.ndarray, target_snr_db: float
+    ) -> float:
+        """计算调整噪声所需的缩放因子以达到目标SNR"""
+        clean_power = np.mean(clean_signal**2)
+        noise_power = np.mean(noise**2)
 
-        Args:
-            signals: 输入信号数组
-            method: 归一化方法，可选 "zscore" (标准化) 或 "minmax" (最小最大归一化)
+        if noise_power == 0:
+            return 0.0
 
-        Returns:
-            归一化后的信号数组
-        """
-        if method == "zscore":
-            normalized = (signals - stats[0]) / stats[1]
-        elif method == "minmax":
-            normalized = (signals - stats[0]) / (stats[1] - stats[0])
-        else:
-            raise ValueError(f"Unknown normalization method: {method}")
-
-        return normalized
-
-    def _create_composite_noise(
-        self, noise_segments_dict: Dict[str, np.ndarray]
-    ) -> np.ndarray:
-        """创建复合噪声，混合所有三种噪声类型"""
-        composite_noise = []
-        noise_types = list(noise_segments_dict.keys())
-
-        # 找到最小长度，确保所有噪声类型都有足够的样本
-        min_length = min(len(segments) for segments in noise_segments_dict.values())
-
-        # 为每种噪声类型创建索引排列
-        indices = {}
-        for nt in noise_types:
-            indices[nt] = np.random.permutation(len(noise_segments_dict[nt]))[
-                :min_length
-            ]
-
-        # 创建复合噪声 (bw_noise + ma_noise + em_noise) / 3
-        for i in range(min_length):
-            mixed_noise = np.zeros(self.window_size, dtype=np.float32)
-
-            for nt in noise_types:
-                noise_segment = noise_segments_dict[nt][indices[nt][i]]
-                mixed_noise += noise_segment
-
-            # 平均所有噪声类型
-            mixed_noise /= len(noise_types)
-            composite_noise.append(mixed_noise)
-
-        return np.array(composite_noise, dtype=np.float32)
+        target_noise_power = clean_power / (10 ** (target_snr_db / 10))
+        scale_factor = np.sqrt(target_noise_power / noise_power)
+        return scale_factor
 
     def _create_noisy_signals(
         self,
         clean_segments: np.ndarray,
-        composite_noise: np.ndarray,
-        snr_db: float = 0.0,
-    ) -> np.ndarray:
-        """创建带复合噪声的信号"""
-        noisy_signals = []
+        noise_segments: Dict[str, np.ndarray],
+        snr_db: float,
+    ) -> Dict[str, np.ndarray]:
+        """为四种噪声类型创建带噪声的信号"""
+        noisy_signals = {}
 
+        # 创建三种单一噪声信号
+        for noise_type, noise_data in noise_segments.items():
+            noisy_segments = []
+
+            for i, clean_sig in enumerate(clean_segments):
+                noise_idx = i % len(noise_data)
+                noise_segment = noise_data[noise_idx].copy()
+
+                scale_factor = self._calculate_snr_adjustment(
+                    clean_sig, noise_segment, snr_db
+                )
+                adjusted_noise = noise_segment * scale_factor
+                noisy_sig = clean_sig + adjusted_noise
+                noisy_segments.append(noisy_sig)
+
+            noisy_signals[noise_type] = np.array(noisy_segments, dtype=np.float32)
+            print(
+                f"Created {len(noisy_segments)} {noise_type} noisy segments at SNR {snr_db}dB"
+            )
+
+        # 创建混合噪声信号（emb：三种噪声均等混合）
+        mixed_noisy_segments = []
         for i, clean_sig in enumerate(clean_segments):
-            # 循环使用复合噪声样本
-            noise_idx = i % len(composite_noise)
-            noise = composite_noise[noise_idx]
+            mixed_noise = np.zeros(self.window_size, dtype=np.float32)
 
-            # 计算SNR并调整噪声水平
-            clean_power = np.mean(clean_sig**2)
-            noise_power = np.mean(noise**2)
+            # 均等混合三种噪声
+            for noise_type in ["bw", "em", "ma"]:
+                noise_idx = i % len(noise_segments[noise_type])
+                noise_segment = noise_segments[noise_type][noise_idx].copy()
 
-            # 根据目标SNR调整噪声
-            target_noise_power = clean_power / (10 ** (snr_db / 10))
-            scale_factor = np.sqrt(target_noise_power / noise_power)
-            noise = noise * scale_factor
+                scale_factor = self._calculate_snr_adjustment(
+                    clean_sig, noise_segment, snr_db
+                )
+                adjusted_noise = noise_segment * scale_factor / 3  # 均等分配
+                mixed_noise += adjusted_noise
 
-            # 合成带噪声的信号
-            noisy_sig = clean_sig + noise
-            noisy_signals.append(noisy_sig)
+            noisy_sig = clean_sig + mixed_noise
+            mixed_noisy_segments.append(noisy_sig)
 
-        return np.array(noisy_signals, dtype=np.float32)
+        noisy_signals["emb"] = np.array(mixed_noisy_segments, dtype=np.float32)
+        print(
+            f"Created {len(mixed_noisy_segments)} emb (mixed) noisy segments at SNR {snr_db}dB"
+        )
+
+        return noisy_signals
+
+    def _zscore_normalize(self, signals: np.ndarray) -> np.ndarray:
+        """Z-score标准化"""
+        mean_val = np.mean(signals)
+        std_val = np.std(signals)
+        normalized = (signals - mean_val) / (std_val)
+        return normalized, mean_val, std_val
 
     def save_split(
         self,
         split_dir: str,
         train_ratio: float = 0.8,
-        val_ratio: float = 0.1,
-        snr_db: float = 0.0,
-        normalization_method: str = "zscore",
-    ) -> Dict[str, List[int]]:
-        """保存数据集划分到 JSON 文件
+        snr_levels: List[float] = None,
+    ):
+        """保存数据集划分"""
+        if snr_levels is None:
+            snr_levels = [-4, -2, 0, 2, 4]  # 论文中使用的SNR级别
 
-        Args:
-            split_dir: 分割文件保存目录
-            train_ratio: 训练集比例
-            val_ratio: 验证集比例
-            snr_db: 信噪比 (dB)
-            normalization_method: 归一化方法，"zscore" 或 "minmax"
-        """
         print("Loading noise segments...")
         noise_segments = self._load_noise_segments()
 
         print("Loading clean segments...")
         clean_segments = self._load_clean_segments()
-        print(f"Loaded {len(clean_segments)} clean segments")
+        print(f"Using {len(clean_segments)} clean segments")
 
-        # 创建复合噪声（混合所有三种噪声）
-        print("Creating composite noise...")
-        composite_noise = self._create_composite_noise(noise_segments)
-        print(f"Created {len(composite_noise)} composite noise segments")
-
-        # 创建带噪声的信号
-        print("Creating noisy signals...")
-        noisy_signals = self._create_noisy_signals(
-            clean_segments, composite_noise, snr_db
-        )
-
-        # 划分索引
+        # 划分索引（4:1训练测试划分）
         n_total = len(clean_segments)
-        indices = list(range(n_total))
-        np.random.shuffle(indices)
+        indices = np.random.permutation(n_total)
 
         n_train = int(n_total * train_ratio)
-        n_val = int(n_total * val_ratio)
-
         train_indices = indices[:n_train]
-        val_indices = indices[n_train : n_train + n_val]
-        test_indices = indices[n_train + n_val :]
+        test_indices = indices[n_train:]
 
-        train_clean_data = noisy_signals[train_indices]
-        train_noisy_data = clean_segments[train_indices]
-        # 计算归一化参数
-        if normalization_method == "zscore":
-            self.clean = (np.mean(train_clean_data), np.std(train_clean_data))
-            self.noisy = (np.mean(train_noisy_data), np.std(train_noisy_data))
-        elif normalization_method == "minmax":
-            self.clean = (np.min(train_clean_data), np.max(train_clean_data))
-            self.noisy = (np.min(train_noisy_data), np.max(train_noisy_data))
-        else:
-            raise ValueError(f"Unknown normalization method: {normalization_method}")
+        # 标准化干净信号
+        clean_normalized, clean_mean, clean_std = self._zscore_normalize(clean_segments)
 
-        # 归一化数据
-        print("Normalizing signals...")
-        noisy_signals_normalized = self._normalize_signals(
-            noisy_signals, self.noisy, method=normalization_method
-        )
-
-        clean_segments_normalized = self._normalize_signals(
-            clean_segments, self.clean, method=normalization_method
-        )
-
-        split_indices = {
-            "train": train_indices,
-            "val": val_indices,
-            "test": test_indices,
+        # 存储划分信息
+        split_info = {
+            "train_indices": train_indices.tolist(),
+            "test_indices": test_indices.tolist(),
+            "total_samples": n_total,
+            "train_ratio": train_ratio,
+            "test_ratio": 1.0 - train_ratio,
+            "window_size": self.window_size,
+            "snr_levels": snr_levels,
+            "noise_types": ["bw", "em", "ma", "emb"],  # 四种噪声类型
+            "clean_mean": float(clean_mean),
+            "clean_std": float(clean_std),
+            "seed": self.seed,
         }
 
         # 确保目录存在
         os.makedirs(split_dir, exist_ok=True)
 
-        # 保存分割信息
-        split_path = os.path.join(split_dir, "split.json")
-        with open(split_path, "w") as f:
-            json.dump(
-                {
-                    "train_indices": train_indices,
-                    "val_indices": val_indices,
-                    "test_indices": test_indices,
-                    "total_samples": n_total,
-                    "train_ratio": train_ratio,
-                    "val_ratio": val_ratio,
-                    "test_ratio": 1.0 - train_ratio - val_ratio,
-                    "window_size": self.window_size,
-                    "step_size": self.step_size,
-                    "snr_db": snr_db,
-                    "seed": self.seed,
-                    "noise_types_used": list(noise_segments.keys()),
-                    "normalization_method": normalization_method,
-                    "original_stats": {
-                        "clean(mean/min)": float(self.clean[0]),
-                        "clean(std/max)": float(self.clean[1]),
-                        "noisy(mean/min)": float(self.noisy[0]),
-                        "noisy(std/max)": float(self.noisy[1]),
-                    },
-                },
-                f,
-                indent=2,
+        # 保存标准化后的干净信号
+        np.save(os.path.join(split_dir, "clean_signals.npy"), clean_normalized)
+
+        # 为每个SNR级别创建四种噪声类型的含噪信号
+        for snr_db in snr_levels:
+            print(f"\nProcessing SNR: {snr_db}dB")
+
+            # 创建带噪声的信号
+            noisy_signals_dict = self._create_noisy_signals(
+                clean_segments, noise_segments, snr_db
             )
 
-        print(f"Saved split to {split_path}")
-        print(f"Train: {len(train_indices)} samples")
-        print(f"Val: {len(val_indices)} samples")
-        print(f"Test: {len(test_indices)} samples")
+            # 保存每种噪声类型的信号（使用相同的标准化参数）
+            for noise_type, noisy_data in noisy_signals_dict.items():
+                noisy_normalized = (noisy_data - clean_mean) / (clean_std)
 
-        # 保存归一化后的数据文件
-        np.save(os.path.join(split_dir, "noisy_signals.npy"), noisy_signals_normalized)
-        np.save(os.path.join(split_dir, "clean_signals.npy"), clean_segments_normalized)
-        np.save(os.path.join(split_dir, "composite_noise.npy"), composite_noise)
+                filename = f"noisy_{noise_type}_snr{snr_db}.npy"
+                np.save(os.path.join(split_dir, filename), noisy_normalized)
+                print(f"Saved {filename}")
 
-        return split_indices
+        # 保存划分信息
+        split_path = os.path.join(split_dir, "split_info.json")
+        with open(split_path, "w") as f:
+            json.dump(split_info, f, indent=2)
+
+        print(f"\nSaved split info to {split_path}")
+        print(f"Train samples: {len(train_indices)}")
+        print(f"Test samples: {len(test_indices)}")
+        print(f"SNR levels: {snr_levels}")
+        print(f"Noise types: bw, em, ma, emb")
+
+        return split_info
 
 
 if __name__ == "__main__":
@@ -274,14 +240,7 @@ if __name__ == "__main__":
 
     manager = SplitManager(mitdb_dir, nstdb_dir)
 
-    # 使用Z-score标准化
+    # 生成数据集
     manager.save_split(
-        split_dir,
-        train_ratio=0.8,
-        val_ratio=0.1,
-        snr_db=0.0,
-        normalization_method="zscore",
+        split_dir=split_dir, train_ratio=0.8, snr_levels=[-4, -2, 0, 2, 4]
     )
-
-    # 或者使用最小最大归一化
-    # manager.save_split(split_dir, train_ratio=0.8, val_ratio=0.1, snr_db=0.0, normalization_method="minmax")
