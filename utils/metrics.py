@@ -1,4 +1,6 @@
 import torch
+import os
+import json
 
 
 def compute_metrics(
@@ -18,6 +20,23 @@ def compute_metrics(
         clean = clean.squeeze(1)
         denoised = denoised.squeeze(1)
         noisy = noisy.squeeze(1)
+
+    split_dir = "./data_split"
+
+    # 加载分割信息
+    split_path = os.path.join(split_dir, "split_info.json")
+    if not os.path.exists(split_path):
+        raise FileNotFoundError(f"Split file not found: {split_path}")
+
+    with open(split_path, "r") as f:
+        split_data = json.load(f)
+
+    # 加载数据文件
+    mean, std = split_data["clean_mean"], split_data["clean_std"]
+
+    # 反标准化
+    clean = clean * std + mean
+    denoised = denoised * std + mean
 
     # RMSE
     rmse = torch.sqrt(torch.mean((clean - denoised) ** 2, dim=1))  # (batch,)

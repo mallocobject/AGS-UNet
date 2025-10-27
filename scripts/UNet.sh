@@ -5,6 +5,6 @@ accelerate launch --config_file ./config.yaml run.py \
     --epochs 100 \
     --lr 1e-3 \
     --noise_type bw \
-    --snr -4 \
+    --snr_db -4 \
     --checkpoint_dir ./checkpoints \
     --mode train \

@@ -10,17 +10,17 @@ class ECGDataset(Dataset):
         self,
         split: str = "train",
         noise_type: str = "bw",
-        snr: int = 0,
+        snr_db: int = 0,
         split_dir: str = "./data_split",
     ):
         super().__init__()
         self.split = split
         self.split_dir = split_dir
         self.noise_type = noise_type
-        self.snr = snr
+        self.snr_db = snr_db
 
-        if snr not in [-4, -2, 0, 2, 4]:
-            raise ValueError(f"Unsupported SNR level: {snr}")
+        if snr_db not in [-4, -2, 0, 2, 4]:
+            raise ValueError(f"Unsupported SNR level: {snr_db}")
 
         if noise_type not in ["bw", "em", "ma", "emb"]:
             raise ValueError(f"Unsupported noise type: {noise_type}")
@@ -43,7 +43,7 @@ class ECGDataset(Dataset):
 
         # 加载数据文件
         self.noisy_signals = np.load(
-            os.path.join(split_dir, f"noisy_{noise_type}_snr{snr}.npy")
+            os.path.join(split_dir, f"noisy_{noise_type}_snr_{snr_db}.npy")
         )
         self.clean_signals = np.load(os.path.join(split_dir, "clean_signals.npy"))
 

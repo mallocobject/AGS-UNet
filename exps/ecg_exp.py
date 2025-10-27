@@ -40,7 +40,7 @@ class ECGDenoisingExperiment:
 
         self.checkpoint = os.path.join(
             self.args.checkpoint_dir,
-            f"best_{self.args.model}_{self.args.noise_type}_snr{self.args.snr}.pth",
+            f"best_{self.args.model}_{self.args.noise_type}_snr_{self.args.snr_db}.pth",
         )
 
     def _build_model(self):
@@ -53,7 +53,7 @@ class ECGDenoisingExperiment:
         dataset = ECGDataset(
             split=split,
             noise_type=self.args.noise_type,
-            snr=self.args.snr,
+            snr_db=self.args.snr_db,
             split_dir=self.args.split_dir,
         )
         dataloader = DataLoader(

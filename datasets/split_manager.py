@@ -146,12 +146,12 @@ class SplitManager:
 
         return noisy_signals
 
-    def _zscore_normalize(self, signals: np.ndarray) -> np.ndarray:
+    def _zscore_normalize(
+        self, signals: np.ndarray, mean: float, std: float
+    ) -> np.ndarray:
         """Z-score标准化"""
-        mean_val = np.mean(signals)
-        std_val = np.std(signals)
-        normalized = (signals - mean_val) / (std_val)
-        return normalized, mean_val, std_val
+        normalized = (signals - mean) / (std)
+        return normalized
 
     def save_split(
         self,
@@ -178,8 +178,13 @@ class SplitManager:
         train_indices = indices[:n_train]
         test_indices = indices[n_train:]
 
+        # 获取mean和std用于标准化
+        train_clean = clean_segments[train_indices]
+        clean_mean = np.mean(train_clean)
+        clean_std = np.std(train_clean)
+
         # 标准化干净信号
-        clean_normalized, clean_mean, clean_std = self._zscore_normalize(clean_segments)
+        clean_normalized = self._zscore_normalize(clean_segments, clean_mean, clean_std)
 
         # 存储划分信息
         split_info = {
@@ -213,9 +218,12 @@ class SplitManager:
 
             # 保存每种噪声类型的信号（使用相同的标准化参数）
             for noise_type, noisy_data in noisy_signals_dict.items():
-                noisy_normalized = (noisy_data - clean_mean) / (clean_std)
+                train_noisy = noisy_data[train_indices]
+                # 使用训练集的mean和std进行标准化
+                mean, std = np.mean(train_noisy), np.std(train_noisy)
+                noisy_normalized = self._zscore_normalize(noisy_data, mean, std)
 
-                filename = f"noisy_{noise_type}_snr{snr_db}.npy"
+                filename = f"noisy_{noise_type}_snr_{snr_db}.npy"
                 np.save(os.path.join(split_dir, filename), noisy_normalized)
                 print(f"Saved {filename}")
 
