@@ -573,7 +573,7 @@ class ralenet(nn.Module):
 
         self.pm3 = PatchMerging(channels[2], norm_layer=norm_layer)
 
-        self.dtransformer34 = nn.Sequential(
+        self.dtransformer4 = nn.Sequential(
             TransformerBlock(channels[3], num_heads=heads[3]),
             TransformerBlock(channels[3], num_heads=heads[3]),
         )
@@ -633,7 +633,7 @@ class ralenet(nn.Module):
         x3 = self.dtransformer3(x2)
         x3 = self.pm3(x3)
 
-        x4 = self.dtransformer34(x3)
+        x4 = self.dtransformer4(x3)
         x4 = self.pm4(x4)
 
         x_mid = self.transformer(x4)

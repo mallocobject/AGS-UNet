@@ -87,10 +87,10 @@ class ECGDenoisingExperiment:
             else:
                 return 0.1
 
-        # scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        #     optimizer, T_max=self.args.epochs, eta_min=1e-4
-        # )
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.args.epochs, eta_min=1e-5
+        )
+        # scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
         return scheduler
 
     def train(self):
@@ -222,7 +222,7 @@ class ECGDenoisingExperiment:
 
         # ====== 测试阶段 ======
         model.eval()
-        metrics = {"RMSE": [], "PRD": [], "SNR": []}
+        metrics = {"RMSE": [], "SNR": []}
 
         with torch.no_grad():
             for x, label in tqdm(
@@ -252,5 +252,5 @@ class ECGDenoisingExperiment:
 
             self.accelerator.print("🚀 Test Results:")
             self.accelerator.print(
-                f"RMSE: {metrics['RMSE']:.4f}, PRD: {metrics['PRD']:.4f}, SNR: {metrics['SNR']:.4f}"
+                f"RMSE: {metrics['RMSE']:.2f}, SNR: {metrics['SNR']:.2f}"
             )

@@ -151,6 +151,64 @@ class DiffTransformerLayer(nn.Module):
         return z
 
 
+class DiffCrossTransformerLayer(nn.Module):
+    """
+    Single Layer of the DiffTransformer with Cross-Attention for time series.
+    """
+
+    def __init__(self, d_model, num_heads, lambda_init):
+        super().__init__()
+        self.norm1 = RMSNorm(d_model)
+        self.cross_attn = MultiHeadDifferentialAttention(
+            d_model, num_heads, lambda_init
+        )
+        self.norm2 = RMSNorm(d_model)
+        self.ff = SwiGLU(d_model)
+
+    def forward(self, x, context):
+        """
+        x: target sequence (query)       -> shape [batch, seq_len, d_model]
+        context: source sequence (key/value) -> shape [batch, seq_len_context, d_model]
+        """
+        # Cross-Attention
+        q = self.norm1(x)
+        kv = self.norm1(context)
+        attn_out = self.cross_attn(q + kv)  # Combine for cross-attention
+        y = attn_out + x
+
+        # Feed Forward
+        z = self.ff(self.norm2(y)) + y
+        return z
+
+
+class CrossTransformerLayer(nn.Module):
+    """
+    Single Layer of the CTransformer with Cross-Attention for time series.
+    """
+
+    def __init__(self, d_model, num_heads):
+        super().__init__()
+        self.norm1 = RMSNorm(d_model)
+        self.cross_attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
+        self.norm2 = RMSNorm(d_model)
+        self.ff = SwiGLU(d_model)
+
+    def forward(self, x, context):
+        """
+        x: target sequence (query)       -> shape [batch, seq_len, d_model]
+        context: source sequence (key/value) -> shape [batch, seq_len_context, d_model]
+        """
+        # Cross-Attention
+        q = self.norm1(x)
+        kv = self.norm1(context)
+        attn_out, _ = self.cross_attn(q, kv, kv)
+        y = attn_out + x
+
+        # Feed Forward
+        z = self.ff(self.norm2(y)) + y
+        return z
+
+
 class TimeSeriesDiffTransformer(nn.Module):
     """
     DiffTransformer model adapted for time series data.

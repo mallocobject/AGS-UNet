@@ -47,18 +47,10 @@ def compute_metrics(denoised: torch.Tensor, clean: torch.Tensor) -> dict:
     rmse = torch.sqrt(torch.mean(diff**2, dim=[1, 2]))  # (batch,)
     rmse_mean = rmse.mean().item()
 
-    # PRD（相对误差百分比）
-    prd = (
-        torch.sqrt(torch.sum(diff**2, dim=[1, 2]))
-        / (torch.sqrt(torch.sum(clean**2, dim=[1, 2])))
-        * 100
-    )
-    prd_mean = prd.mean().item()
-
     # SNR（dB）
     noise_power = torch.mean(diff**2, dim=[1, 2])
     signal_power = torch.mean(clean**2, dim=[1, 2])
     snr = 10 * torch.log10(signal_power / (noise_power))
     snr_mean = snr.mean().item()
 
-    return {"RMSE": rmse_mean, "PRD": prd_mean, "SNR": snr_mean}
+    return {"RMSE": rmse_mean, "SNR": snr_mean}

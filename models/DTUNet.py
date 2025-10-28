@@ -11,7 +11,13 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import RMSNorm
-from layers import AbsPositionalEncoding, DRSNBlock, DiffTransformerLayer
+from layers import (
+    AbsPositionalEncoding,
+    DRSNBlock,
+    DiffTransformerLayer,
+    CrossTransformerLayer,
+    DiffCrossTransformerLayer,
+)
 
 
 class LinearAtten(nn.Module):
@@ -128,19 +134,22 @@ class UNetEncoder(nn.Module):
         in_channels = input_channels
         out_channels = base_channels
 
-        self.in_conv = nn.Sequential(
-            nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm1d(out_channels),
-            nn.ReLU(inplace=True),
-        )
+        # self.in_conv = nn.Sequential(
+        #     nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
+        #     nn.BatchNorm1d(out_channels),
+        #     nn.ReLU(inplace=True),
+        # )
 
         for i in range(num_layers):
             # 每个编码层包含两个卷积
             layer = nn.Sequential(
-                DRSNBlock(out_channels, out_channels),
+                nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
+                nn.BatchNorm1d(out_channels),
+                nn.ReLU(inplace=True),
                 # nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1),
                 # nn.BatchNorm1d(out_channels),
                 # nn.ReLU(inplace=True),
+                DRSNBlock(out_channels, out_channels),
             )
             self.layers.append(layer)
 
@@ -160,7 +169,8 @@ class UNetEncoder(nn.Module):
             bottleneck: 最底层的特征
         """
         features = []
-        current = self.in_conv(x)
+        # current = self.in_conv(x)
+        current = x
 
         for i, layer in enumerate(self.layers):
             current = layer(current)
@@ -292,6 +302,143 @@ class BottleneckDiffTransformer(nn.Module):
         return output
 
 
+class BottleneckCrossTransformer(nn.Module):
+    """
+    在UNet底层应用DiffTransformer
+    """
+
+    def __init__(self, bottleneck_channels, d_model, num_heads, num_layers):
+        super().__init__()
+        self.bottleneck_channels = bottleneck_channels
+        self.d_model = d_model
+
+        # 将卷积特征投影到Transformer维度
+        self.input_proj = nn.Linear(bottleneck_channels, d_model)
+
+        # DiffTransformer层
+        self.transformer_layers1 = nn.ModuleList(
+            [CrossTransformerLayer(d_model // 2, num_heads) for l in range(num_layers)]
+        )
+
+        self.transformer_layers2 = nn.ModuleList(
+            [CrossTransformerLayer(d_model // 2, num_heads) for l in range(num_layers)]
+        )
+
+        # 投影回卷积特征维度
+        self.output_proj = nn.Linear(d_model, bottleneck_channels)
+
+        self.norm = RMSNorm(d_model)
+
+    def forward(self, x):
+        """
+        Args:
+            x: (batch_size, bottleneck_channels, sequence_length)
+        Returns:
+            transformed: (batch_size, bottleneck_channels, sequence_length)
+        """
+        batch_size, channels, seq_len = x.shape
+
+        # 转换为序列格式: (batch_size, seq_len, channels)
+        x_seq = x.permute(0, 2, 1)
+        # 投影到Transformer维度
+        x_seq = self.input_proj(x_seq)  # (batch_size, seq_len,
+
+        x1, x2 = torch.chunk(x_seq, 2, dim=2)
+
+        # 应用Transformer层
+        current1 = x1
+        current2 = x2
+        for l in range(len(self.transformer_layers1)):
+            out1 = self.transformer_layers1[l](current1, current2)
+            out2 = self.transformer_layers2[l](current2, current1)
+
+            current1 = out1
+            current2 = out2
+
+        current = torch.cat((current1, current2), dim=2)
+        current = self.norm(current)
+        current = self.output_proj(
+            current
+        )  # (batch_size, seq_len, bottleneck_channels)
+
+        # 转换回卷积格式
+        output = current.permute(0, 2, 1)  # (batch_size, bottleneck_channels, seq_len)
+
+        return output
+
+
+class BottleneckDiffCrossTransformer(nn.Module):
+    """
+    在UNet底层应用DiffTransformer
+    """
+
+    def __init__(self, bottleneck_channels, d_model, num_heads, num_layers):
+        super().__init__()
+        self.bottleneck_channels = bottleneck_channels
+        self.d_model = d_model
+
+        # 将卷积特征投影到Transformer维度
+        self.input_proj = nn.Linear(bottleneck_channels, d_model)
+
+        # DiffTransformer层
+        self.transformer_layers1 = nn.ModuleList(
+            [
+                DiffTransformerLayer(
+                    d_model // 2, num_heads, 0.8 - 0.6 * math.exp(-0.3 * (-1))
+                ),
+                CrossTransformerLayer(d_model // 2, num_heads),
+            ]
+        )
+
+        self.transformer_layers2 = nn.ModuleList(
+            [
+                DiffTransformerLayer(
+                    d_model // 2, num_heads, 0.8 - 0.6 * math.exp(-0.3 * (-1))
+                ),
+                CrossTransformerLayer(d_model // 2, num_heads),
+            ]
+        )
+
+        # 投影回卷积特征维度
+        self.output_proj = nn.Linear(d_model, bottleneck_channels)
+
+        self.norm = RMSNorm(d_model)
+
+    def forward(self, x):
+        """
+        Args:
+            x: (batch_size, bottleneck_channels, sequence_length)
+        Returns:
+            transformed: (batch_size, bottleneck_channels, sequence_length)
+        """
+        batch_size, channels, seq_len = x.shape
+
+        # 转换为序列格式: (batch_size, seq_len, channels)
+        x_seq = x.permute(0, 2, 1)
+        # 投影到Transformer维度
+        x_seq = self.input_proj(x_seq)  # (batch_size, seq_len,
+
+        x1, x2 = torch.chunk(x_seq, 2, dim=2)
+
+        # 应用Transformer层
+        x1 = self.transformer_layers1[0](x1)
+        x2 = self.transformer_layers2[0](x2)
+
+        current1 = self.transformer_layers1[1](x1, x2)
+        current2 = self.transformer_layers2[1](x2, x1)
+
+        current = torch.cat((current1, current2), dim=2)
+        current = self.norm(current)
+        current = self.output_proj(
+            current
+        )  # (batch_size, seq_len, bottleneck_channels)
+
+        # 转换回卷积格式
+        output = current.permute(0, 2, 1)  # (batch_size, bottleneck_channels, seq_len)
+
+        return output
+
+
 class UNetWithDiffTransformer(nn.Module):
     """
     结合UNet和底层DiffTransformer的完整模型
@@ -301,22 +448,27 @@ class UNetWithDiffTransformer(nn.Module):
         self,
         input_channels,
         output_channels,
-        base_channels=8,
+        base_channels=16,
         num_unet_layers=4,
-        d_model=256,
-        num_heads=32,
+        d_model=64,
+        num_heads=8,
         num_transformer_layers=2,
     ):
         super().__init__()
 
         # UNet编码器
-        self.encoder = UNetEncoder(input_channels, base_channels, num_unet_layers)
+        self.encoder1 = UNetEncoder(
+            input_channels // 2, base_channels // 2, num_unet_layers
+        )
+        self.encoder2 = UNetEncoder(
+            input_channels // 2, base_channels // 2, num_unet_layers
+        )
 
         # 计算底层通道数
         bottleneck_channels = base_channels * (2 ** (num_unet_layers - 1))
 
         # 底层DiffTransformer
-        self.bottleneck_transformer = BottleneckDiffTransformer(
+        self.bottleneck_transformer = BottleneckDiffCrossTransformer(
             bottleneck_channels=bottleneck_channels,
             d_model=d_model,
             num_heads=num_heads,
@@ -324,7 +476,12 @@ class UNetWithDiffTransformer(nn.Module):
         )
 
         # UNet解码器
-        self.decoder = UNetDecoder(output_channels, base_channels, num_unet_layers)
+        self.decoder1 = UNetDecoder(
+            output_channels // 2, base_channels // 2, num_unet_layers
+        )
+        self.decoder2 = UNetDecoder(
+            output_channels // 2, base_channels // 2, num_unet_layers
+        )
 
     def forward(self, x):
         """
@@ -334,14 +491,24 @@ class UNetWithDiffTransformer(nn.Module):
             output: (batch_size, output_channels, sequence_length)
         """
         # 编码器提取多尺度特征
-        features, bottleneck = self.encoder(x)
+        x1, x2 = torch.chunk(x, 2, dim=1)
+        features1, bottleneck1 = self.encoder1(x1)
+        features2, bottleneck2 = self.encoder2(x2)
+
+        bottleneck = torch.cat((bottleneck1, bottleneck2), dim=1)
 
         # 在底层应用Transformer
         transformed_bottleneck = self.bottleneck_transformer(bottleneck)
 
-        # 解码器重建
-        output = self.decoder(features, transformed_bottleneck)
+        transformed_bottleneck1, transformed_bottleneck2 = torch.chunk(
+            transformed_bottleneck, 2, dim=1
+        )
 
+        # 解码器重建
+        output1 = self.decoder1(features1, transformed_bottleneck1)
+        output2 = self.decoder2(features2, transformed_bottleneck2)
+
+        output = torch.cat((output1, output2), dim=1)
         return output
 
 
@@ -354,10 +521,10 @@ class DTUNet(nn.Module):
         self,
         input_channels=2,
         output_channels=2,
-        base_channels=8,
-        num_unet_layers=5,
+        base_channels=16,
+        num_unet_layers=4,
         d_model=64,
-        num_heads=4,
+        num_heads=8,
         num_transformer_layers=2,
     ):
         super().__init__()
