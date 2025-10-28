@@ -47,7 +47,7 @@ class ECGDataset(Dataset):
         )
         self.clean_signals = np.load(os.path.join(split_dir, "clean_signals.npy"))
 
-        print(f"Loaded {split} dataset with {len(self.indices)} samples")
+        # print(f"Loaded {split} dataset with {len(self.indices)} samples")
 
     def __len__(self):
         return len(self.indices)

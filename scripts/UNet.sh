@@ -7,4 +7,4 @@ accelerate launch --config_file ./config.yaml run.py \
     --noise_type bw \
     --snr_db -4 \
     --checkpoint_dir ./checkpoints \
-    --mode test \
+    --mode train \

@@ -149,6 +149,8 @@ class ECGDenoisingExperiment:
                 f"Epoch {epoch+1}/{self.args.epochs}, Train Loss: {avg_loss:.4f}"
             )
 
+            self.test(model=model)
+
         torch.save(self.accelerator.get_state_dict(model), self.checkpoint)
         self.accelerator.print(f"✅ Model saved to {self.checkpoint}")
         self.accelerator.print("🏁 Training completed!")
@@ -206,15 +208,14 @@ class ECGDenoisingExperiment:
 
     #     return {"loss": vali_loss, **metrics}
 
-    def test(self):
+    def test(self, model: nn.Module = None):
         test_dataloader = self._get_dataloader("test")
 
-        model = self._build_model()
-
-        # ====== 加载 checkpoint ======
-        model.load_state_dict(
-            torch.load(self.checkpoint, weights_only=True, map_location="cpu")
-        )
+        if model is None:
+            model = self._build_model()
+            model.load_state_dict(
+                torch.load(self.checkpoint, weights_only=True, map_location="cpu")
+            )
 
         # prepare（保证设备、DDP兼容）
         model, test_dataloader = self.accelerator.prepare(model, test_dataloader)

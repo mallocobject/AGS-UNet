@@ -179,6 +179,7 @@ class TimeSeriesDiffTransformer(nn.Module):
             use_positional_encoding: Whether to use positional encoding
             dropout: Dropout rate
         """
+
         super().__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
 

@@ -52,10 +52,10 @@ class DecBlock(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, in_channels=1) -> None:
+    def __init__(self, in_channels=2) -> None:
         super(UNet, self).__init__()
 
-        channels = [2**n for n in range(5)]
+        channels = [2 ** (n + 1) for n in range(5)]
         self.EncList = nn.ModuleList()
         self.DecList = nn.ModuleList()
 
@@ -79,8 +79,6 @@ class UNet(nn.Module):
         )
 
     def forward(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # (B, 1, L)
 
         encfeature = []
         for i in range(3):
@@ -98,11 +96,11 @@ class UNet(nn.Module):
 
         x = self.DecList[3](x)
 
-        return x.squeeze(1)
+        return x
 
 
 if __name__ == "__main__":
     model = UNet()
-    x = torch.randn(32, 256)
+    x = torch.randn(32, 2, 256)
     y = model(x)
     print(y.shape)

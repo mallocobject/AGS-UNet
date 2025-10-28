@@ -312,6 +312,7 @@ class MSAttention(nn.Module):
         self.dim = dim
         self.num_heads = num_heads
         head_dim = dim // num_heads
+
         self.scale = qk_scale or head_dim**-0.5
 
         self.qkv_proj = LinearProjection(

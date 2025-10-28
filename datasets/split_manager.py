@@ -177,6 +177,7 @@ class SplitManager:
 
         # 获取mean和std用于标准化
         train_clean = clean_segments[train_indices]
+
         clean_mean = np.mean(train_clean, axis=(0, 1), keepdims=True)
         clean_std = np.std(train_clean, axis=(0, 1), keepdims=True)
 

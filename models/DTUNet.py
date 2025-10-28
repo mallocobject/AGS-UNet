@@ -128,13 +128,19 @@ class UNetEncoder(nn.Module):
         in_channels = input_channels
         out_channels = base_channels
 
+        self.in_conv = nn.Sequential(
+            nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+
         for i in range(num_layers):
             # 每个编码层包含两个卷积
             layer = nn.Sequential(
-                DRSNBlock(in_channels, out_channels),
-                nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1),
-                nn.BatchNorm1d(out_channels),
-                nn.ReLU(inplace=True),
+                DRSNBlock(out_channels, out_channels),
+                # nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1),
+                # nn.BatchNorm1d(out_channels),
+                # nn.ReLU(inplace=True),
             )
             self.layers.append(layer)
 
@@ -154,7 +160,7 @@ class UNetEncoder(nn.Module):
             bottleneck: 最底层的特征
         """
         features = []
-        current = x
+        current = self.in_conv(x)
 
         for i, layer in enumerate(self.layers):
             current = layer(current)
@@ -226,9 +232,7 @@ class BottleneckDiffTransformer(nn.Module):
     在UNet底层应用DiffTransformer
     """
 
-    def __init__(
-        self, bottleneck_channels, d_model, num_heads, num_layers, lambda_init=0.5
-    ):
+    def __init__(self, bottleneck_channels, d_model, num_heads, num_layers):
         super().__init__()
         self.bottleneck_channels = bottleneck_channels
         self.d_model = d_model
@@ -265,6 +269,7 @@ class BottleneckDiffTransformer(nn.Module):
 
         # 投影到Transformer维度
         x_proj = self.input_proj(x_seq)  # (batch_size, seq_len, d_model)
+        # x_proj = x_seq  # 假设bottleneck_channels == d_model
 
         # 应用Transformer层
         current = x_proj
@@ -277,6 +282,7 @@ class BottleneckDiffTransformer(nn.Module):
         output_seq = self.output_proj(
             current
         )  # (batch_size, seq_len, bottleneck_channels)
+        # output_seq = current  # 假设bottleneck_channels == d_model
 
         # 转换回卷积格式
         output = output_seq.permute(
@@ -298,7 +304,7 @@ class UNetWithDiffTransformer(nn.Module):
         base_channels=8,
         num_unet_layers=4,
         d_model=256,
-        num_heads=4,
+        num_heads=32,
         num_transformer_layers=2,
     ):
         super().__init__()
@@ -315,7 +321,6 @@ class UNetWithDiffTransformer(nn.Module):
             d_model=d_model,
             num_heads=num_heads,
             num_layers=num_transformer_layers,
-            lambda_init=0.5,
         )
 
         # UNet解码器
@@ -350,7 +355,7 @@ class DTUNet(nn.Module):
         input_channels=2,
         output_channels=2,
         base_channels=8,
-        num_unet_layers=4,
+        num_unet_layers=5,
         d_model=64,
         num_heads=4,
         num_transformer_layers=2,
