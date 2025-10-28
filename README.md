@@ -1,5 +1,5 @@
 # DTUNet
-## config.yaml配置GPU_id和GPU_num
+config.yaml配置GPU_id和GPU_num
 
 scripts关注噪声类别以及强度
 
