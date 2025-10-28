@@ -73,8 +73,8 @@ if __name__ == "__main__":
     train_dataset = ECGDataset(split="train", split_dir="./data_split")
     test_dataset = ECGDataset(split="test", split_dir="./data_split")
 
-    print(f"训练集大小: {len(train_dataset)}")
-    print(f"测试集大小: {len(test_dataset)}")
+    print(f"训练集形状: {len(train_dataset)}")
+    print(f"测试集形状: {len(test_dataset)}")
 
     # 测试一个样本
     noisy, clean = train_dataset[0]
@@ -82,11 +82,16 @@ if __name__ == "__main__":
 
     plt.figure(figsize=(12, 6))
     plt.subplot(2, 1, 1)
-    plt.title("Noisy ECG Signal")
-    plt.plot(noisy.numpy())
+    plt.plot(noisy[0].numpy(), label="Noisy ECG")
+    plt.plot(clean[0].numpy(), label="Clean ECG")
+    plt.legend()
+    plt.title("ECG Signal Sample from Training Set, channel 0")
+
     plt.subplot(2, 1, 2)
-    plt.title("Clean ECG Signal")
-    plt.plot(clean.numpy())
+    plt.plot(noisy[1].numpy(), label="Noisy ECG")
+    plt.plot(clean[1].numpy(), label="Clean ECG")
+    plt.legend()
+    plt.title("ECG Signal Sample from Training Set, channel 1")
+
     plt.tight_layout()
     plt.show()
-    print("样本加载成功")

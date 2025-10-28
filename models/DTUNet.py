@@ -11,7 +11,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils import RMSNorm
-from layers import AbsPositionalEncoding, DRSNBlock
+from layers import AbsPositionalEncoding, DRSNBlock, DiffTransformerLayer
 
 
 class LinearAtten(nn.Module):
@@ -48,7 +48,6 @@ class LeTransformerBlock(nn.Module):
     def __init__(self, dim, num_heads=4, ff_mult=4, dropout=0.1):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
-        # self.attn = nn.attention(embed_dim=dim, num_heads=num_heads, batch_first=True)
         self.attn = LinearAtten(in_dims=dim, heads=num_heads)
         self.norm2 = nn.LayerNorm(dim)
         self.ff = nn.Sequential(
@@ -72,173 +71,6 @@ class LeTransformerBlock(nn.Module):
         x = x + ff_out
         return rearrange(x, "b l c -> b c l")
 
-    # ========= Transformer 模块 =========
-
-
-class TransformerBlock(nn.Module):
-    def __init__(self, dim, num_heads=4, ff_mult=4, dropout=0.1):
-        super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
-        self.attn = nn.MultiheadAttention(
-            embed_dim=dim, num_heads=num_heads, batch_first=True
-        )
-        self.norm2 = nn.LayerNorm(dim)
-        self.ff = nn.Sequential(
-            nn.Linear(dim, ff_mult * dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(ff_mult * dim, dim),
-        )
-
-    def forward(self, x):
-        x = rearrange(x, "b c l -> b l c")
-        attn_in = self.norm1(x)
-        attn_out, _ = self.attn(attn_in, attn_in, attn_in)
-        x = x + attn_out
-
-        ff_in = self.norm2(x)
-        ff_out = self.ff(ff_in)
-        x = x + ff_out
-        return rearrange(x, "b l c -> b c l")
-
-
-def lambda_init_fn(depth):
-    return 0.8 - 0.6 * math.exp(-0.3 * depth)
-
-
-def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """torch.repeat_interleave(x, dim=1, repeats=n_rep)"""
-    bs, n_kv_heads, slen, head_dim = x.shape
-    if n_rep == 1:
-        return x
-    return (
-        x[:, :, None, :, :]
-        .expand(bs, n_kv_heads, n_rep, slen, head_dim)
-        .reshape(bs, n_kv_heads * n_rep, slen, head_dim)
-    )
-
-
-class MultiheadDuffAttn(nn.Module):
-    def __init__(
-        self,
-        embed_dim,
-        depth,
-        num_heads,
-        dropout=0.1,
-    ):
-        super().__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.num_kv_heads = num_heads
-        self.dropout = nn.Dropout(dropout)
-
-        self.n_rep = self.num_heads // self.num_kv_heads
-
-        self.head_dim = embed_dim // num_heads // 2
-        self.scaling = self.head_dim**-0.5
-
-        self.to_q = nn.Linear(embed_dim, embed_dim, bias=False)
-        self.to_k = nn.Linear(embed_dim, embed_dim // self.n_rep, bias=False)
-        self.to_v = nn.Linear(embed_dim, embed_dim // self.n_rep, bias=False)
-
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
-
-        self.lambda_init = lambda_init_fn(depth)
-        self.lambda_q1 = nn.Parameter(
-            torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1)
-        )
-        self.lambda_k1 = nn.Parameter(
-            torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1)
-        )
-        self.lambda_q2 = nn.Parameter(
-            torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1)
-        )
-        self.lambda_k2 = nn.Parameter(
-            torch.zeros(self.head_dim, dtype=torch.float32).normal_(mean=0, std=0.1)
-        )
-
-        self.subln = RMSNorm(2 * self.head_dim, eps=1e-5, elementwise_affine=True)
-
-    def forward(self, x: torch.Tensor):
-        bsz, seq_len, _ = x.size()
-
-        q = self.to_q(x)
-        k = self.to_k(x)
-        v = self.to_v(x)
-
-        q = q.contiguous().view(bsz, seq_len, self.num_heads * 2, self.head_dim)
-        k = k.contiguous().view(bsz, seq_len, self.num_kv_heads * 2, self.head_dim)
-        v = v.contiguous().view(bsz, seq_len, self.num_kv_heads, 2 * self.head_dim)
-
-        # cos, sin = rel_pos
-        # q = apply_rotary_emb(q, cos, sin, interleaved=True)
-        # k = apply_rotary_emb(k, cos, sin, interleaved=True)
-
-        q = q.transpose(1, 2)
-        k = repeat_kv(k.transpose(1, 2), self.n_rep)
-        v = repeat_kv(v.transpose(1, 2), self.n_rep)
-        q *= self.scaling
-        attn_weights = torch.matmul(q, k.transpose(-1, -2))
-        attn_mask = torch.triu(
-            torch.full((seq_len, seq_len), float("-inf"), device=attn_weights.device), 1
-        )
-
-        attn_weights = torch.nan_to_num(attn_weights)
-        attn_weights = attn_weights + attn_mask
-        attn_weights = F.softmax(attn_weights, dim=-1).type_as(attn_weights)
-
-        lambda_1 = torch.exp(torch.sum(self.lambda_q1 * self.lambda_k1, dim=-1))
-        lambda_2 = torch.exp(torch.sum(self.lambda_q2 * self.lambda_k2, dim=-1))
-        lambda_ = lambda_1 - lambda_2 + self.lambda_init
-        attn_weights = attn_weights.contiguous().view(
-            bsz, self.num_heads, 2, seq_len, seq_len
-        )
-        attn_weights = attn_weights[:, :, 0] - lambda_ * attn_weights[:, :, 1]
-
-        attn = torch.matmul(attn_weights, v)
-        attn = self.subln(attn)
-        attn = attn * (1 - self.lambda_init)
-        attn = (
-            attn.transpose(1, 2)
-            .contiguous()
-            .view(bsz, seq_len, self.num_heads * 2 * self.head_dim)
-        )
-
-        attn = self.out_proj(attn)
-        attn = self.dropout(attn)
-        return attn
-
-
-class DiffTransformerBlock(nn.Module):
-    def __init__(self, dim, depth=0, num_heads=4, ff_mult=4, dropout=0.1):
-        super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
-        self.attn = MultiheadDuffAttn(
-            embed_dim=dim, depth=depth, num_heads=num_heads, dropout=dropout
-        )
-        self.norm2 = nn.LayerNorm(dim)
-        self.ff = nn.Sequential(
-            nn.Linear(dim, ff_mult * dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(ff_mult * dim, dim),
-        )
-
-        self.rel_pos = AbsPositionalEncoding(dim, max_len=1000)
-
-    def forward(self, x):
-        # x: (B, C, L) -> (B, L, C)
-        x = rearrange(x, "b c l -> b l c")
-        x = self.rel_pos(x)
-        attn_in = self.norm1(x)
-        attn_out = self.attn(attn_in)
-        x = x + attn_out
-
-        ff_in = self.norm2(x)
-        ff_out = self.ff(ff_in)
-        x = x + ff_out
-        return rearrange(x, "b l c -> b c l")
-
 
 class PatchMerging(nn.Module):
     def __init__(self, dim, norm_layer=nn.LayerNorm):
@@ -248,6 +80,7 @@ class PatchMerging(nn.Module):
         self.norm = norm_layer(2 * dim)
 
     def forward(self, x):
+        x = x.permute(0, 2, 1)  # B L C
         B, L, C = x.shape
 
         # padding
@@ -261,7 +94,7 @@ class PatchMerging(nn.Module):
 
         x = self.norm(x)
         x = self.reduction(x)
-
+        x = x.permute(0, 2, 1)  # B C L
         return x
 
 
@@ -269,160 +102,286 @@ class PatchSeparate(nn.Module):
     def __init__(self, dim, norm_layer=nn.LayerNorm) -> None:
         super().__init__()
         self.dim = dim
-        self.reduction = nn.Linear(dim // 2, dim // 2, bias=False)  # 输入是 dim//2
+        self.reduction = nn.Linear(dim // 2, dim // 2, bias=False)
         self.norm = norm_layer(dim // 2)
 
     def forward(self, x):
+        x = x.permute(0, 2, 1)  # B L C
         B, L, C = x.shape
         x = rearrange(x, "b l (c1 c2) -> b (c1 l) c2", c1=2)
         x = self.norm(x)
         x = self.reduction(x)
+        x = x.permute(0, 2, 1)  # B C L
         return x
 
 
-class EncBlock(nn.Module):
+class UNetEncoder(nn.Module):
+    """
+    UNet编码器部分,提取多尺度特征
+    """
 
-    def __init__(self, in_channels, kernel_size, padding=1, stride=1, use_relu=True):
-        super(EncBlock, self).__init__()
-        self.conv = nn.Conv1d(
-            in_channels=in_channels,
-            out_channels=in_channels,
-            kernel_size=kernel_size,
-            padding=padding,
-            stride=stride,
-        )
-        self.bn = nn.BatchNorm1d(in_channels)
-        self.relu = nn.LeakyReLU()
+    def __init__(self, input_channels, base_channels=8, num_layers=4):
+        super().__init__()
+        self.layers = nn.ModuleList()
+        self.downsample = nn.ModuleList()
+
+        in_channels = input_channels
+        out_channels = base_channels
+
+        for i in range(num_layers):
+            # 每个编码层包含两个卷积
+            layer = nn.Sequential(
+                DRSNBlock(in_channels, out_channels),
+                nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1),
+                nn.BatchNorm1d(out_channels),
+                nn.ReLU(inplace=True),
+            )
+            self.layers.append(layer)
+
+            # 下采样（除了最后一层）
+            if i < num_layers - 1:
+                self.downsample.append(PatchMerging(dim=out_channels))
+                # 更新下一层的输入通道数
+                out_channels *= 2
+                in_channels = out_channels
 
     def forward(self, x):
-        x = self.conv(x)
-        x = self.relu(self.bn(x))
-        return x
+        """
+        Args:
+            x: (batch_size, channels, sequence_length)
+        Returns:
+            features: 各层的特征列表，从浅到深
+            bottleneck: 最底层的特征
+        """
+        features = []
+        current = x
+
+        for i, layer in enumerate(self.layers):
+            current = layer(current)
+            features.append(current)
+
+            if i < len(self.downsample):
+                current = self.downsample[i](current)
+
+        return features, current
 
 
-class DecBlock(nn.Module):
+class UNetDecoder(nn.Module):
+    """
+    UNet解码器部分,结合编码器特征进行上采样
+    """
 
-    def __init__(self, in_channels, kernel_size, stride=1, padding=1, use_relu=True):
-        super(DecBlock, self).__init__()
-        self.use_relu = use_relu
+    def __init__(self, output_channels, base_channels=8, num_layers=4):
+        super().__init__()
+        self.upsample = nn.ModuleList()
+        self.layers = nn.ModuleList()
 
-        self.conv = nn.ConvTranspose1d(
-            in_channels=in_channels,
-            out_channels=in_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
+        # 计算各层的通道数（从深到浅）
+        channels = [base_channels * (2**i) for i in range(num_layers, -1, -1)]
+
+        for i in range(num_layers):
+            # 上采样 + 跳跃连接
+            if i > 0:
+                self.upsample.append(PatchSeparate(dim=channels[i]))
+
+            layer = nn.Sequential(
+                nn.Conv1d(channels[i + 1], channels[i + 1], kernel_size=3, padding=1),
+                nn.BatchNorm1d(channels[i + 1]),
+                nn.ReLU(inplace=True),
+                nn.Conv1d(channels[i + 1], channels[i + 1], kernel_size=3, padding=1),
+                nn.BatchNorm1d(channels[i + 1]),
+                nn.ReLU(inplace=True),
+            )
+            self.layers.append(layer)
+
+        # 最后一层输出
+        self.final_conv = nn.Conv1d(channels[-1], output_channels, kernel_size=1)
+
+    def forward(self, features, bottleneck):
+        """
+        Args:
+            features: 编码器各层特征（从浅到深）
+            bottleneck: 最底层特征
+        Returns:
+            重建的输出
+        """
+        current = bottleneck
+
+        # 反转特征列表，从深到浅
+        skip_features = list(reversed(features))
+
+        for i, layer in enumerate(self.layers):
+            # 上采样
+            if i > 0:
+                current = self.upsample[i - 1](current)
+            # 跳跃连接
+            current = current + skip_features[i]
+            current = layer(current)
+
+        return self.final_conv(current)
+
+
+class BottleneckDiffTransformer(nn.Module):
+    """
+    在UNet底层应用DiffTransformer
+    """
+
+    def __init__(
+        self, bottleneck_channels, d_model, num_heads, num_layers, lambda_init=0.5
+    ):
+        super().__init__()
+        self.bottleneck_channels = bottleneck_channels
+        self.d_model = d_model
+
+        # 将卷积特征投影到Transformer维度
+        self.input_proj = nn.Linear(bottleneck_channels, d_model)
+
+        # DiffTransformer层
+        self.transformer_layers = nn.ModuleList(
+            [
+                DiffTransformerLayer(
+                    d_model, num_heads, 0.8 - 0.6 * math.exp(-0.3 * (l - 1))
+                )
+                for l in range(num_layers)
+            ]
         )
-        self.bn = nn.BatchNorm1d(in_channels)
-        if use_relu:
-            self.relu = nn.LeakyReLU()
+
+        # 投影回卷积特征维度
+        self.output_proj = nn.Linear(d_model, bottleneck_channels)
+
+        self.norm = RMSNorm(d_model)
 
     def forward(self, x):
-        x = self.conv(x)
-        if self.use_relu:
-            x = self.relu(self.bn(x))
-        else:
-            x = self.bn(x)
-        return x
+        """
+        Args:
+            x: (batch_size, bottleneck_channels, sequence_length)
+        Returns:
+            transformed: (batch_size, bottleneck_channels, sequence_length)
+        """
+        batch_size, channels, seq_len = x.shape
+
+        # 转换为序列格式: (batch_size, seq_len, channels)
+        x_seq = x.permute(0, 2, 1)
+
+        # 投影到Transformer维度
+        x_proj = self.input_proj(x_seq)  # (batch_size, seq_len, d_model)
+
+        # 应用Transformer层
+        current = x_proj
+        for layer in self.transformer_layers:
+            current = layer(current)
+
+        current = self.norm(current)
+
+        # 投影回原始维度
+        output_seq = self.output_proj(
+            current
+        )  # (batch_size, seq_len, bottleneck_channels)
+
+        # 转换回卷积格式
+        output = output_seq.permute(
+            0, 2, 1
+        )  # (batch_size, bottleneck_channels, seq_len)
+
+        return output
+
+
+class UNetWithDiffTransformer(nn.Module):
+    """
+    结合UNet和底层DiffTransformer的完整模型
+    """
+
+    def __init__(
+        self,
+        input_channels,
+        output_channels,
+        base_channels=8,
+        num_unet_layers=4,
+        d_model=256,
+        num_heads=4,
+        num_transformer_layers=2,
+    ):
+        super().__init__()
+
+        # UNet编码器
+        self.encoder = UNetEncoder(input_channels, base_channels, num_unet_layers)
+
+        # 计算底层通道数
+        bottleneck_channels = base_channels * (2 ** (num_unet_layers - 1))
+
+        # 底层DiffTransformer
+        self.bottleneck_transformer = BottleneckDiffTransformer(
+            bottleneck_channels=bottleneck_channels,
+            d_model=d_model,
+            num_heads=num_heads,
+            num_layers=num_transformer_layers,
+            lambda_init=0.5,
+        )
+
+        # UNet解码器
+        self.decoder = UNetDecoder(output_channels, base_channels, num_unet_layers)
+
+    def forward(self, x):
+        """
+        Args:
+            x: (batch_size, input_channels, sequence_length)
+        Returns:
+            output: (batch_size, output_channels, sequence_length)
+        """
+        # 编码器提取多尺度特征
+        features, bottleneck = self.encoder(x)
+
+        # 在底层应用Transformer
+        transformed_bottleneck = self.bottleneck_transformer(bottleneck)
+
+        # 解码器重建
+        output = self.decoder(features, transformed_bottleneck)
+
+        return output
 
 
 class DTUNet(nn.Module):
-    def __init__(self, in_channels=1) -> None:
+    """
+    专门用于时间序列去噪的模型
+    """
+
+    def __init__(
+        self,
+        input_channels=2,
+        output_channels=2,
+        base_channels=8,
+        num_unet_layers=4,
+        d_model=64,
+        num_heads=4,
+        num_transformer_layers=2,
+    ):
         super().__init__()
 
-        channels = [2 ** (i + 3) for i in range(5)]
-        heads = [2 ** (i + 1) for i in range(5)]
-
-        self.in_conv = nn.Sequential(
-            nn.Conv1d(in_channels, channels[0], kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2),
-            nn.BatchNorm1d(channels[0]),
+        self.unet_transformer = UNetWithDiffTransformer(
+            input_channels=input_channels,
+            output_channels=output_channels,
+            base_channels=base_channels,
+            num_unet_layers=num_unet_layers,
+            d_model=d_model,
+            num_heads=num_heads,
+            num_transformer_layers=num_transformer_layers,
         )
 
-        self.encoder = nn.ModuleList()
-        self.downsamplers = nn.ModuleList()
-        self.decoder = nn.ModuleList()
-        self.upsamplers = nn.ModuleList()
-
-        for i in range(4):
-            self.encoder.append(
-                # i
-                nn.Sequential(
-                    EncBlock(
-                        in_channels=channels[i],
-                        kernel_size=3,
-                        padding=1,
-                        stride=1,
-                        use_relu=True,
-                    ),
-                    DRSNBlock(
-                        chin=channels[i],
-                        chout=channels[i],
-                        stride=1,
-                    ),
-                ),
-            )
-
-            self.downsamplers.append(PatchMerging(dim=channels[i]))
-
-        for i in range(4):
-            use_relu = True if i < 3 else False
-            self.decoder.append(
-                # 3 - i
-                nn.Sequential(
-                    DecBlock(
-                        in_channels=channels[3 - i],
-                        kernel_size=3,
-                        stride=1,
-                        padding=1,
-                        use_relu=use_relu,
-                    ),
-                    DecBlock(
-                        in_channels=channels[3 - i],
-                        kernel_size=3,
-                        stride=1,
-                        padding=1,
-                        use_relu=use_relu,
-                    ),
-                )
-            )
-            self.upsamplers.append(PatchSeparate(dim=channels[4 - i]))
-
-        self.bottleneck = DiffTransformerBlock(
-            dim=channels[-1], num_heads=heads[-1], ff_mult=4
-        )
-
-        self.final_conv = nn.Conv1d(channels[0], in_channels, kernel_size=3, padding=1)
-
-    def forward(self, x):
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # (B, 1, L)
-
-        x = self.in_conv(x)
-        skips = []
-        for enc, down in zip(self.encoder, self.downsamplers):
-            x = enc(x)
-            skips.append(x)
-            x = rearrange(x, "b c l -> b l c")
-            x = down(x)
-            x = rearrange(x, "b l c -> b c l")
-
-        x = self.bottleneck(x)
-
-        for dec, up in zip(self.decoder, self.upsamplers):
-            x = rearrange(x, "b c l -> b l c")
-            x = up(x)
-            x = rearrange(x, "b l c -> b c l")
-            skip = skips.pop()
-            x = x + skip
-            x = dec(x)
-
-        x = self.final_conv(x)
-        return x.squeeze(1)
+    def forward(self, noisy_signal):
+        """
+        Args:
+            noisy_signal: 带噪声的信号 (batch_size, channels, sequence_length)
+        Returns:
+            denoised_signal: 去噪后的信号 (batch_size, channels, sequence_length)
+        """
+        return self.unet_transformer(noisy_signal)
 
 
 if __name__ == "__main__":
     model = DTUNet()
-    x = torch.randn(2, 256)
+    print(model)
+
+    x = torch.randn(32, 2, 256)
+
     y = model(x)
     print(y.shape)

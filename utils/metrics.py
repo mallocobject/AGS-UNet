@@ -11,15 +11,6 @@ def compute_metrics(
     计算ECG信号去噪评估指标:
     RMSE, PRD, SNR
     """
-    if clean.dim() == 1:
-        clean = clean.unsqueeze(0)
-        denoised = denoised.unsqueeze(0)
-        noisy = noisy.unsqueeze(0)
-
-    if clean.dim() == 3:
-        clean = clean.squeeze(1)
-        denoised = denoised.squeeze(1)
-        noisy = noisy.squeeze(1)
 
     split_dir = "./data_split"
 
@@ -33,10 +24,20 @@ def compute_metrics(
 
     # 加载数据文件
     mean, std = split_data["clean_mean"], split_data["clean_std"]
+    mean = torch.tensor(mean, device=clean.device, dtype=clean.dtype)
+    std = torch.tensor(std, device=clean.device, dtype=clean.dtype)
+
+    clean = clean.permute(0, 2, 1)  # (batch, window_size, channels)
+    denoised = denoised.permute(0, 2, 1)  # (batch, window_size, channels)
 
     # 反标准化
     clean = clean * std + mean
     denoised = denoised * std + mean
+
+    clean = clean.reshape(clean.shape[0], -1)  # (batch, window_size * channels)
+    denoised = denoised.reshape(
+        denoised.shape[0], -1
+    )  # (batch, window_size * channels)
 
     # RMSE
     rmse = torch.sqrt(torch.mean((clean - denoised) ** 2, dim=1))  # (batch,)

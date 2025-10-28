@@ -81,9 +81,16 @@ class ECGDenoisingExperiment:
         return optimizer
 
     def _select_scheduler(self, optimizer: optim.Optimizer):
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.args.epochs, eta_min=1e-4
-        )
+        def lr_lambda(epoch):
+            if epoch < 40:
+                return 1.0  # 保持初始学习率
+            else:
+                return 0.1
+
+        # scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        #     optimizer, T_max=self.args.epochs, eta_min=1e-4
+        # )
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
         return scheduler
 
     def train(self):
@@ -121,6 +128,7 @@ class ECGDenoisingExperiment:
                 )
 
                 optimizer.zero_grad()
+                # print(x.shape, label.shape)
                 outputs = model(x)
                 loss = criterion(outputs, label)
                 losses.append(loss.item())

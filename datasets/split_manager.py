@@ -33,7 +33,7 @@ class SplitManager:
 
         for noise_type in nstdb_files:
             rec = wfdb.rdrecord(os.path.join(self.nstdb_dir, noise_type))
-            noise_signal = rec.p_signal[:, 0]
+            noise_signal = rec.p_signal
 
             # 随机采样10000个片段
             segments = []
@@ -41,7 +41,7 @@ class SplitManager:
 
             for _ in range(10000):
                 start_idx = np.random.randint(0, max_start)
-                seg = noise_signal[start_idx : start_idx + self.window_size]
+                seg = noise_signal[start_idx : start_idx + self.window_size, :]
                 segments.append(seg)
 
             noise_segments[noise_type] = np.array(segments, dtype=np.float32)
@@ -56,14 +56,14 @@ class SplitManager:
 
         for record_id in records:
             rec = wfdb.rdrecord(os.path.join(self.mitdb_dir, record_id))
-            ecg_signal = rec.p_signal[:, 0]
+            ecg_signal = rec.p_signal
 
             max_start = len(ecg_signal) - self.window_size
             num_segments_per_record = max(1, len(ecg_signal) // (self.window_size * 10))
 
             for _ in range(num_segments_per_record):
                 start_idx = np.random.randint(0, max_start)
-                seg = ecg_signal[start_idx : start_idx + self.window_size]
+                seg = ecg_signal[start_idx : start_idx + self.window_size, :]
                 clean_segments.append(seg)
 
         # 随机选择10000个片段
@@ -81,11 +81,8 @@ class SplitManager:
         self, clean_signal: np.ndarray, noise: np.ndarray, target_snr_db: float
     ) -> float:
         """计算调整噪声所需的缩放因子以达到目标SNR"""
-        clean_power = np.mean(clean_signal**2)
-        noise_power = np.mean(noise**2)
-
-        if noise_power == 0:
-            return 0.0
+        clean_power = np.mean(clean_signal**2, axis=(0, 1), keepdims=True)
+        noise_power = np.mean(noise**2, axis=(0, 1), keepdims=True)
 
         target_noise_power = clean_power / (10 ** (target_snr_db / 10))
         scale_factor = np.sqrt(target_noise_power / noise_power)
@@ -123,7 +120,7 @@ class SplitManager:
         # 创建混合噪声信号（emb：三种噪声均等混合）
         mixed_noisy_segments = []
         for i, clean_sig in enumerate(clean_segments):
-            mixed_noise = np.zeros(self.window_size, dtype=np.float32)
+            mixed_noise = np.zeros((self.window_size, 2), dtype=np.float32)
 
             # 均等混合三种噪声
             for noise_type in ["bw", "em", "ma"]:
@@ -147,7 +144,7 @@ class SplitManager:
         return noisy_signals
 
     def _zscore_normalize(
-        self, signals: np.ndarray, mean: float, std: float
+        self, signals: np.ndarray, mean: np.ndarray, std: np.ndarray
     ) -> np.ndarray:
         """Z-score标准化"""
         normalized = (signals - mean) / (std)
@@ -164,10 +161,10 @@ class SplitManager:
             snr_levels = [-4, -2, 0, 2, 4]  # 论文中使用的SNR级别
 
         print("Loading noise segments...")
-        noise_segments = self._load_noise_segments()
+        noise_segments = self._load_noise_segments()  # (10000, window_size, 2)
 
         print("Loading clean segments...")
-        clean_segments = self._load_clean_segments()
+        clean_segments = self._load_clean_segments()  # (10000, window_size, 2)
         print(f"Using {len(clean_segments)} clean segments")
 
         # 划分索引（4:1训练测试划分）
@@ -180,8 +177,8 @@ class SplitManager:
 
         # 获取mean和std用于标准化
         train_clean = clean_segments[train_indices]
-        clean_mean = np.mean(train_clean)
-        clean_std = np.std(train_clean)
+        clean_mean = np.mean(train_clean, axis=(0, 1), keepdims=True)
+        clean_std = np.std(train_clean, axis=(0, 1), keepdims=True)
 
         # 标准化干净信号
         clean_normalized = self._zscore_normalize(clean_segments, clean_mean, clean_std)
@@ -196,8 +193,8 @@ class SplitManager:
             "window_size": self.window_size,
             "snr_levels": snr_levels,
             "noise_types": ["bw", "em", "ma", "emb"],  # 四种噪声类型
-            "clean_mean": float(clean_mean),
-            "clean_std": float(clean_std),
+            "clean_mean": clean_mean.tolist(),
+            "clean_std": clean_std.tolist(),
             "seed": self.seed,
         }
 
@@ -205,6 +202,9 @@ class SplitManager:
         os.makedirs(split_dir, exist_ok=True)
 
         # 保存标准化后的干净信号
+        clean_normalized = clean_normalized.transpose(
+            0, 2, 1
+        )  # (num_samples, 2, window_size)
         np.save(os.path.join(split_dir, "clean_signals.npy"), clean_normalized)
 
         # 为每个SNR级别创建四种噪声类型的含噪信号
@@ -220,9 +220,13 @@ class SplitManager:
             for noise_type, noisy_data in noisy_signals_dict.items():
                 train_noisy = noisy_data[train_indices]
                 # 使用训练集的mean和std进行标准化
-                mean, std = np.mean(train_noisy), np.std(train_noisy)
+                mean = np.mean(train_noisy, axis=(0, 1), keepdims=True)
+                std = np.std(train_noisy, axis=(0, 1), keepdims=True)
                 noisy_normalized = self._zscore_normalize(noisy_data, mean, std)
 
+                noisy_normalized = noisy_normalized.transpose(
+                    0, 2, 1
+                )  # (num_samples, 2, window_size)
                 filename = f"noisy_{noise_type}_snr_{snr_db}.npy"
                 np.save(os.path.join(split_dir, filename), noisy_normalized)
                 print(f"Saved {filename}")

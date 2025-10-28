@@ -4,12 +4,26 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import pandas as pd
+from einops import rearrange, reduce, repeat
 import warnings
 
 warnings.filterwarnings("ignore")
 
 
 class APReLU(nn.Module):
+    """An implementation of APReLU(Adaptively Parametric ReLU) from the paper 'Deep Residual Networks With Adaptively Parametric Rectifier Linear Units for Fault Diagnosis'
+
+    Args:
+        channels (int): the number of channels of the input.
+
+    Examples:
+        >>> m = APReLU(64)
+        >>> tensor_1 = torch.randn(2, 64, 32) # batch_size should be greater than 1 since a batch norm layer is used.
+        >>> output = m(tensor_1)
+        >>> output.shape
+        torch.Size([2, 64, 32])
+    """
+
     def __init__(self, channels):
         super(APReLU, self).__init__()
         self.gap = nn.AdaptiveAvgPool1d(1)
@@ -36,6 +50,7 @@ class APReLU(nn.Module):
 
 
 class EncoderCell(nn.Module):
+
     def __init__(
         self,
         in_channels,
@@ -47,8 +62,8 @@ class EncoderCell(nn.Module):
     ):
         super(EncoderCell, self).__init__()
         self.conv = nn.Conv1d(
-            in_channels=in_channels,
-            out_channels=out_channels,
+            in_channels,
+            out_channels,
             kernel_size=kernel_size,
             padding=padding,
             stride=stride,
@@ -63,30 +78,30 @@ class EncoderCell(nn.Module):
         out = self.conv(x)
         out = self.activate(out)
         out = self.bn(out)
+        # print(out.shape)
         return out
 
 
 class DeNoiseEnc(nn.Module):
-    def __init__(self, input_channels=1, using_APReLU=True):
-        super().__init__()
+    def __init__(self, using_APReLU=True):
+        super(DeNoiseEnc, self).__init__()
         self.conv_kernel = [17, 17, 3, 3]
         self.paddingsize = [8, 8, 1, 1]
-        self.out_channels = [2, 4, 8, 16]
+        self.out_channels = [4, 8, 16, 32]
         self.EncoderList = nn.ModuleList()
-
-        current_channels = input_channels
+        input_channel = 2
         for i in range(4):
             self.EncoderList.add_module(
                 "cell{}".format(i),
                 EncoderCell(
-                    in_channels=current_channels,
-                    out_channels=self.out_channels[i],
-                    kernel_size=self.conv_kernel[i],
-                    padding=self.paddingsize[i],
+                    input_channel,
+                    self.out_channels[i],
+                    self.conv_kernel[i],
+                    self.paddingsize[i],
                     using_APReLU=using_APReLU,
                 ),
             )
-            current_channels = self.out_channels[i]
+            input_channel = self.out_channels[i]
 
     def forward(self, x):
         out = []
@@ -97,11 +112,26 @@ class DeNoiseEnc(nn.Module):
 
 
 class DAM(nn.Module):
+    """Dual Attention module from the paper 'Dual Attention Convolutional Neural Network Based on Adaptive Parametric ReLU for Denoising ECG Signals with Strong Noise'
+
+    This module contains a spatial attention and a channel attention.
+
+    Args:
+        channels (int): the number of channels of the input.
+
+    Examples:
+        >>> m = DAM(64)
+        >>> tensor_1 = torch.randn(2, 64, 32) # batch_size should be greater than 1 since a batch norm layer is used.
+        >>> output = m(tensor_1)
+        >>> output.shape
+        torch.Size([2, 64, 32])
+    """
+
     def __init__(self, channels):
-        super().__init__()
+        super(DAM, self).__init__()
+        # Channel Attention
         self.gap = nn.AdaptiveAvgPool1d(1)
         self.gmp = nn.AdaptiveMaxPool1d(1)
-
         fcnList = [
             nn.Linear(channels, channels),
             nn.BatchNorm1d(channels),
@@ -113,7 +143,7 @@ class DAM(nn.Module):
         self.fcn1 = nn.Sequential(*fcnList)
         self.fcn2 = nn.Sequential(*fcnList)
 
-        # 空间注意力
+        # Spatial Attention
         self.cap = nn.AdaptiveAvgPool1d(1)
         self.cmp = nn.AdaptiveMaxPool1d(1)
         self.convsa = nn.Conv1d(2, 1, 1)
@@ -139,6 +169,7 @@ class DAM(nn.Module):
 
 
 class DecoderCell(nn.Module):
+
     def __init__(
         self,
         in_channels,
@@ -149,7 +180,7 @@ class DecoderCell(nn.Module):
         using_APReLU=True,
         last=False,
     ):
-        super().__init__()
+        super(DecoderCell, self).__init__()
         self.last = last
 
         self.deconv = nn.ConvTranspose1d(
@@ -165,20 +196,38 @@ class DecoderCell(nn.Module):
             self.activate = nn.LeakyReLU(0.2)
         self.bn = nn.BatchNorm1d(out_channels)
 
-        if not last:
+        if last == False:
             self.dam = DAM(out_channels)
 
     def forward(self, x):
         outx = self.deconv(x)
         outx = self.activate(outx)
         outx = self.bn(outx)
-        if not self.last:
+        if self.last is not True:
             outx = self.dam(outx)
+        # print(outx.shape)
         return outx
 
 
 def alignment_add(tensor1, tensor2, alignment_opt="trunc"):
-    """add with auto-alignment"""
+    """add with auto-alignment
+
+    Using for the transpose convolution. Transpose convolution will cause the size of the output uncertain. However, in the unet structure, the size of the output should be the same as the input. So, we need to align the size of the output with the input.
+
+    Args:
+        tensor1: the first tensor
+        tensor2: the second tensor, only the last dim is not same as the first tensor
+        alignment_opt: the alignment option, can be 'trunc' or 'padding'
+
+    Examples:
+        >>> tensor1 = torch,randn(1, 2, 3)
+        >>> tensor2 = torch.randn(1, 2, 4)
+        >>> tensor3 = alignment_add(tensor1, tensor2)
+        >>> tensor3.shape
+        torch.Size([1, 2, 3])
+
+    """
+
     assert (
         tensor1.shape[0:-1] == tensor2.shape[0:-1]
     ), "the shape of the first tensor should be the same as the second tensor"
@@ -193,38 +242,39 @@ def alignment_add(tensor1, tensor2, alignment_opt="trunc"):
 
 
 class DeNoiseDec(nn.Module):
-    def __init__(self, input_channels=16):
+
+    def __init__(
+        self,
+    ):
         super(DeNoiseDec, self).__init__()
         self.conv_kernel = [4, 4, 18, 18]
         self.paddingsize = [1, 1, 8, 8]
-        self.out_channels = [8, 4, 2, 1]
-
+        self.out_channels = [16, 8, 4, 2]
         DecoderList = []
-        current_channels = input_channels
+        in_channels = 32
         for i in range(4):
             if i != 3:
                 DecoderList.append(
                     DecoderCell(
-                        in_channels=current_channels,
-                        out_channels=self.out_channels[i],
-                        kernel_size=self.conv_kernel[i],
-                        padding=self.paddingsize[i],
+                        in_channels,
+                        self.out_channels[i],
+                        self.conv_kernel[i],
+                        self.paddingsize[i],
                         using_APReLU=True,
                     )
                 )
             else:
                 DecoderList.append(
                     DecoderCell(
-                        in_channels=current_channels,
-                        out_channels=self.out_channels[i],
-                        kernel_size=self.conv_kernel[i],
-                        padding=self.paddingsize[i],
+                        in_channels,
+                        self.out_channels[i],
+                        self.conv_kernel[i],
+                        self.paddingsize[i],
                         using_APReLU=True,
                         last=True,
                     )
                 )
-            current_channels = self.out_channels[i]
-
+            in_channels = self.out_channels[i]
         self.DecoderList = nn.ModuleList(DecoderList)
 
     def forward(self, xlist):
@@ -232,27 +282,22 @@ class DeNoiseDec(nn.Module):
         y2 = self.DecoderList[1](alignment_add(y3, xlist[-2]))
         y1 = self.DecoderList[2](alignment_add(y2, xlist[-3]))
         y0 = self.DecoderList[3](alignment_add(y1, xlist[-4]))
+
         return y0
 
 
 class Seq2Seq2(nn.Module):
-    def __init__(self, input_channels=1):
+
+    def __init__(self):
         super(Seq2Seq2, self).__init__()
-        self.enc = DeNoiseEnc(input_channels=input_channels)
-        self.dec = DeNoiseDec(input_channels=16)  # 编码器输出16通道
+        self.enc = DeNoiseEnc()
+        self.dec = DeNoiseDec()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # 添加通道维度 (B, L) -> (B, 1, L)
-
-        output = self.dec(self.enc(x))
-
-        # 确保输出是单通道
-        return output.squeeze(1)  # (B, 1, L) -> (B, L)
+    def forward(self, x):
+        return self.dec(self.enc(x))
 
 
 if __name__ == "__main__":
-    a = torch.randn(4, 256)
-    model = Seq2Seq2(input_channels=1)
-    b = model(a)
-    print(b.shape)  # 应该输出 torch.Size([4, 256])
+    a = torch.randn(10, 2, 256)
+    s2s = Seq2Seq2()
+    print(s2s(a).shape)

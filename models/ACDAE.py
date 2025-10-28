@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
+
+from einops import rearrange, repeat
 
 
 class ECA_module(nn.Module):
@@ -59,7 +62,7 @@ class ACDAE(nn.Module):
     def __init__(self) -> None:
         super(ACDAE, self).__init__()
 
-        channels = [1, 16, 32, 64, 128]
+        channels = [2, 16, 32, 64, 128]
         Kernal_Size = [13, 7, 7, 7]
         self.EncList = nn.ModuleList()
         self.DecList = nn.ModuleList()
@@ -80,9 +83,7 @@ class ACDAE(nn.Module):
                 )
             )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # 添加通道维度
+    def forward(self, x):
         encfeature = []
         for i in range(3):
             x = self.EncList[i](x)
@@ -93,11 +94,14 @@ class ACDAE(nn.Module):
         for i in range(3):
             x = self.DecList[i](x)
             x += encfeature[-(i + 1)]
-        return self.DecList[3](x).squeeze(1)
+        return self.DecList[3](x)
 
 
 if __name__ == "__main__":
-    model = ACDAE()
-    x = torch.randn(10, 256)
-    y = model(x)
+    x = torch.rand(16, 2, 256)
+    x = x.cuda()
+    acdae = ACDAE()
+    acdae = acdae.cuda()
+    with torch.no_grad():
+        y = acdae(x)
     print(y.shape)

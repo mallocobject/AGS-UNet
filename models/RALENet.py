@@ -528,7 +528,6 @@ class PatchMerging(nn.Module):
 class ralenet(nn.Module):
     def __init__(
         self,
-        in_channels=1,
         qkv_bias=True,
         qk_scale=None,
         attn_drop=0.0,
@@ -548,7 +547,7 @@ class ralenet(nn.Module):
         heads = [2 ** (i + 1) for i in range(5)]
 
         self.conv1 = nn.Sequential(
-            nn.Conv1d(in_channels, channels[0], kernel_size=3, padding=1),
+            nn.Conv1d(2, channels[0], kernel_size=3, padding=1),
             nn.LeakyReLU(0.2),
             nn.BatchNorm1d(channels[0]),
         )
@@ -615,12 +614,10 @@ class ralenet(nn.Module):
         self.ps1 = PatchSeparate(channels[1], norm_layer=norm_layer)
 
         self.transconv = nn.Sequential(
-            nn.Conv1d(channels[0], in_channels, kernel_size=3, padding=1),
+            nn.Conv1d(channels[0], 2, kernel_size=3, padding=1),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dim() == 2:
-            x = x.unsqueeze(1)  # B C L
         B, C, L = x.shape
         x = self.conv1(x)
 
@@ -661,12 +658,12 @@ class ralenet(nn.Module):
         x_1 = rearrange(x_1, "b l c -> b c l")
         x_1 += x
 
-        return self.transconv(x_1).squeeze(1)
+        return self.transconv(x_1)
 
 
 if __name__ == "__main__":
 
-    x = torch.rand(16, 256)
+    x = torch.rand(16, 2, 256)
     x = x.cuda()
     relanet = ralenet()
     relanet = relanet.cuda()
