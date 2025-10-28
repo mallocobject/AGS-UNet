@@ -73,6 +73,9 @@ if __name__ == "__main__":
     train_dataset = ECGDataset(split="train", split_dir="./data_split")
     test_dataset = ECGDataset(split="test", split_dir="./data_split")
 
+    clean = train_dataset[0][1]
+    print(f"样本信号形状: {clean.shape}")
+
     print(f"训练集形状: {len(train_dataset)}")
     print(f"测试集形状: {len(test_dataset)}")
 

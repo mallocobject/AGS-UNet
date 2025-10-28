@@ -184,21 +184,6 @@ class SplitManager:
         # 标准化干净信号
         clean_normalized = self._zscore_normalize(clean_segments, clean_mean, clean_std)
 
-        # 存储划分信息
-        split_info = {
-            "train_indices": train_indices.tolist(),
-            "test_indices": test_indices.tolist(),
-            "total_samples": n_total,
-            "train_ratio": train_ratio,
-            "test_ratio": 1.0 - train_ratio,
-            "window_size": self.window_size,
-            "snr_levels": snr_levels,
-            "noise_types": ["bw", "em", "ma", "emb"],  # 四种噪声类型
-            "clean_mean": clean_mean.tolist(),
-            "clean_std": clean_std.tolist(),
-            "seed": self.seed,
-        }
-
         # 确保目录存在
         os.makedirs(split_dir, exist_ok=True)
 
@@ -217,13 +202,10 @@ class SplitManager:
                 clean_segments, noise_segments, snr_db
             )
 
-            # 保存每种噪声类型的信号（使用相同的标准化参数）
             for noise_type, noisy_data in noisy_signals_dict.items():
-                train_noisy = noisy_data[train_indices]
-                # 使用训练集的mean和std进行标准化
-                mean = np.mean(train_noisy, axis=(0, 1), keepdims=True)
-                std = np.std(train_noisy, axis=(0, 1), keepdims=True)
-                noisy_normalized = self._zscore_normalize(noisy_data, mean, std)
+                noisy_normalized = self._zscore_normalize(
+                    noisy_data, clean_mean, clean_std
+                )
 
                 noisy_normalized = noisy_normalized.transpose(
                     0, 2, 1
@@ -231,6 +213,21 @@ class SplitManager:
                 filename = f"noisy_{noise_type}_snr_{snr_db}.npy"
                 np.save(os.path.join(split_dir, filename), noisy_normalized)
                 print(f"Saved {filename}")
+
+        # 保存划分信息
+        split_info = {
+            "train_indices": train_indices.tolist(),
+            "test_indices": test_indices.tolist(),
+            "total_samples": n_total,
+            "train_ratio": train_ratio,
+            "test_ratio": 1.0 - train_ratio,
+            "window_size": self.window_size,
+            "snr_levels": snr_levels,
+            "noise_types": ["bw", "em", "ma", "emb"],  # 四种噪声类型
+            "clean_mean": clean_mean.tolist(),
+            "clean_std": clean_std.tolist(),
+            "seed": self.seed,
+        }
 
         # 保存划分信息
         split_path = os.path.join(split_dir, "split_info.json")

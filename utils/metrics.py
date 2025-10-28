@@ -3,58 +3,62 @@ import os
 import json
 
 
-def compute_metrics(
-    denoised: torch.Tensor,
-    clean: torch.Tensor,
-) -> dict:
+def compute_metrics(denoised: torch.Tensor, clean: torch.Tensor) -> dict:
     """
-    计算ECG信号去噪评估指标:
-    RMSE, PRD, SNR
+    计算 ECG 信号去噪指标：
+    RMSE、PRD、SNR(batch 维度求平均)
     """
-
     split_dir = "./data_split"
-
-    # 加载分割信息
     split_path = os.path.join(split_dir, "split_info.json")
+
     if not os.path.exists(split_path):
         raise FileNotFoundError(f"Split file not found: {split_path}")
 
     with open(split_path, "r") as f:
         split_data = json.load(f)
 
-    # 加载数据文件
-    mean, std = split_data["clean_mean"], split_data["clean_std"]
-    mean = torch.tensor(mean, device=clean.device, dtype=clean.dtype)
-    std = torch.tensor(std, device=clean.device, dtype=clean.dtype)
+    # mean, std: (1, 1, C)
+    mean = torch.tensor(
+        split_data["clean_mean"], device=clean.device, dtype=clean.dtype
+    )
+    std = torch.tensor(split_data["clean_std"], device=clean.device, dtype=clean.dtype)
 
-    clean = clean.permute(0, 2, 1)  # (batch, window_size, channels)
-    denoised = denoised.permute(0, 2, 1)  # (batch, window_size, channels)
+    mean = mean.permute(0, 2, 1)  # (1, C, 1)
+    std = std.permute(0, 2, 1)  # (1, C, 1)
+
+    # === 保证形状匹配 ===
+    # 输入通常是 (batch, channels, length)
+    if clean.ndim == 2:
+        clean = clean.unsqueeze(1)
+        denoised = denoised.unsqueeze(1)
 
     # 反标准化
     clean = clean * std + mean
     denoised = denoised * std + mean
 
-    clean = clean.reshape(clean.shape[0], -1)  # (batch, window_size * channels)
-    denoised = denoised.reshape(
-        denoised.shape[0], -1
-    )  # (batch, window_size * channels)
+    # 保证浮点精度（避免半精度误差）
+    clean = clean.float()
+    denoised = denoised.float()
 
-    # RMSE
-    rmse = torch.sqrt(torch.mean((clean - denoised) ** 2, dim=1))  # (batch,)
-    rmse_mean = torch.mean(rmse).item()
+    # === 计算指标 ===
+    diff = clean - denoised
 
-    # PRD
+    # RMSE（每样本取均值）
+    rmse = torch.sqrt(torch.mean(diff**2, dim=[1, 2]))  # (batch,)
+    rmse_mean = rmse.mean().item()
+
+    # PRD（相对误差百分比）
     prd = (
-        torch.sqrt(torch.sum((clean - denoised) ** 2, dim=1))
-        / (torch.sqrt(torch.sum(clean**2, dim=1)))
+        torch.sqrt(torch.sum(diff**2, dim=[1, 2]))
+        / (torch.sqrt(torch.sum(clean**2, dim=[1, 2])))
         * 100
-    )  # (batch,)
-    prd_mean = torch.mean(prd).item()
+    )
+    prd_mean = prd.mean().item()
 
-    # SNR
-    noise_power = torch.mean((clean - denoised) ** 2, dim=1)
-    signal_power = torch.mean(clean**2, dim=1)
-    SNR = 10 * torch.log10((signal_power) / (noise_power))  # (batch,)
-    SNR_mean = torch.mean(SNR).item()
+    # SNR（dB）
+    noise_power = torch.mean(diff**2, dim=[1, 2])
+    signal_power = torch.mean(clean**2, dim=[1, 2])
+    snr = 10 * torch.log10(signal_power / (noise_power))
+    snr_mean = snr.mean().item()
 
-    return {"RMSE": rmse_mean, "PRD": prd_mean, "SNR": SNR_mean}
+    return {"RMSE": rmse_mean, "PRD": prd_mean, "SNR": snr_mean}
