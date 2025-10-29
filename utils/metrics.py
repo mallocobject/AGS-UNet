@@ -1,27 +1,13 @@
 import torch
-import os
-import json
 
 
-def compute_metrics(denoised: torch.Tensor, clean: torch.Tensor) -> dict:
+def compute_metrics(
+    denoised: torch.Tensor, clean: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
+) -> dict:
     """
     计算 ECG 信号去噪指标：
     RMSE、PRD、SNR(batch 维度求平均)
     """
-    split_dir = "./data_split"
-    split_path = os.path.join(split_dir, "split_info.json")
-
-    if not os.path.exists(split_path):
-        raise FileNotFoundError(f"Split file not found: {split_path}")
-
-    with open(split_path, "r") as f:
-        split_data = json.load(f)
-
-    # mean, std: (1, 1, C)
-    mean = torch.tensor(
-        split_data["clean_mean"], device=clean.device, dtype=clean.dtype
-    )
-    std = torch.tensor(split_data["clean_std"], device=clean.device, dtype=clean.dtype)
 
     mean = mean.permute(0, 2, 1)  # (1, C, 1)
     std = std.permute(0, 2, 1)  # (1, C, 1)
@@ -33,7 +19,6 @@ def compute_metrics(denoised: torch.Tensor, clean: torch.Tensor) -> dict:
         denoised = denoised.unsqueeze(1)
 
     # 反标准化
-    clean = clean * std + mean
     denoised = denoised * std + mean
 
     # 保证浮点精度（避免半精度误差）

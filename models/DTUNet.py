@@ -17,6 +17,7 @@ from layers import (
     DiffTransformerLayer,
     CrossTransformerLayer,
     DiffCrossTransformerLayer,
+    AttentionGate1D,
 )
 
 
@@ -134,18 +135,18 @@ class UNetEncoder(nn.Module):
         in_channels = input_channels
         out_channels = base_channels
 
-        # self.in_conv = nn.Sequential(
-        #     nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
-        #     nn.BatchNorm1d(out_channels),
-        #     nn.ReLU(inplace=True),
-        # )
+        self.in_conv = nn.Sequential(
+            nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(inplace=True),
+        )
 
         for i in range(num_layers):
             # 每个编码层包含两个卷积
             layer = nn.Sequential(
-                nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
-                nn.BatchNorm1d(out_channels),
-                nn.ReLU(inplace=True),
+                # nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1),
+                # nn.BatchNorm1d(out_channels),
+                # nn.ReLU(inplace=True),
                 # nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1),
                 # nn.BatchNorm1d(out_channels),
                 # nn.ReLU(inplace=True),
@@ -153,12 +154,12 @@ class UNetEncoder(nn.Module):
             )
             self.layers.append(layer)
 
-            # 下采样（除了最后一层）
-            if i < num_layers - 1:
-                self.downsample.append(PatchMerging(dim=out_channels))
-                # 更新下一层的输入通道数
-                out_channels *= 2
-                in_channels = out_channels
+            # # 下采样（除了最后一层）
+            # if i < num_layers - 1:
+            self.downsample.append(PatchMerging(dim=out_channels))
+            # 更新下一层的输入通道数
+            out_channels *= 2
+            in_channels = out_channels
 
     def forward(self, x):
         """
@@ -169,15 +170,15 @@ class UNetEncoder(nn.Module):
             bottleneck: 最底层的特征
         """
         features = []
-        # current = self.in_conv(x)
-        current = x
+        current = self.in_conv(x)
+        # current = x
 
         for i, layer in enumerate(self.layers):
             current = layer(current)
             features.append(current)
 
-            if i < len(self.downsample):
-                current = self.downsample[i](current)
+            # if i < len(self.downsample):
+            current = self.downsample[i](current)
 
         return features, current
 
@@ -193,25 +194,26 @@ class UNetDecoder(nn.Module):
         self.layers = nn.ModuleList()
 
         # 计算各层的通道数（从深到浅）
-        channels = [base_channels * (2**i) for i in range(num_layers, -1, -1)]
+        # channels = [base_channels * (2**i) for i in range(num_layers, -1, -1)]
+        in_channels = base_channels * (2**num_layers)
 
         for i in range(num_layers):
-            # 上采样 + 跳跃连接
-            if i > 0:
-                self.upsample.append(PatchSeparate(dim=channels[i]))
-
+            self.upsample.append(PatchSeparate(dim=in_channels))
+            in_channels //= 2  # 上采样后通道数减半
             layer = nn.Sequential(
-                nn.Conv1d(channels[i + 1], channels[i + 1], kernel_size=3, padding=1),
-                nn.BatchNorm1d(channels[i + 1]),
+                nn.Conv1d(in_channels, in_channels, kernel_size=3, padding=1),
+                nn.BatchNorm1d(in_channels),
                 nn.ReLU(inplace=True),
-                nn.Conv1d(channels[i + 1], channels[i + 1], kernel_size=3, padding=1),
-                nn.BatchNorm1d(channels[i + 1]),
+                nn.Conv1d(in_channels, in_channels, kernel_size=3, padding=1),
+                nn.BatchNorm1d(in_channels),
                 nn.ReLU(inplace=True),
             )
             self.layers.append(layer)
 
+            # 更新下一层的通道数
+
         # 最后一层输出
-        self.final_conv = nn.Conv1d(channels[-1], output_channels, kernel_size=1)
+        self.final_conv = nn.Conv1d(in_channels, output_channels, kernel_size=1)
 
     def forward(self, features, bottleneck):
         """
@@ -228,8 +230,8 @@ class UNetDecoder(nn.Module):
 
         for i, layer in enumerate(self.layers):
             # 上采样
-            if i > 0:
-                current = self.upsample[i - 1](current)
+            # if i > 0:
+            current = self.upsample[i](current)
             # 跳跃连接
             current = current + skip_features[i]
             current = layer(current)
@@ -465,7 +467,7 @@ class UNetWithDiffTransformer(nn.Module):
         )
 
         # 计算底层通道数
-        bottleneck_channels = base_channels * (2 ** (num_unet_layers - 1))
+        bottleneck_channels = base_channels * (2**num_unet_layers)
 
         # 底层DiffTransformer
         self.bottleneck_transformer = BottleneckDiffCrossTransformer(

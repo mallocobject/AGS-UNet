@@ -47,7 +47,28 @@ class ECGDataset(Dataset):
         )
         self.clean_signals = np.load(os.path.join(split_dir, "clean_signals.npy"))
 
+        train_noisy = self.noisy_signals[self.split_data["train_indices"]]
+
+        self.__mean = np.mean(train_noisy, axis=(0, 1), keepdims=True)
+        self.__std = np.std(train_noisy, axis=(0, 1), keepdims=True)
+
+        if split == "train":
+            self.noisy_signals = (self.noisy_signals - self.__mean) / self.__std
+            self.clean_signals = (self.clean_signals - self.__mean) / self.__std
+        else:
+            self.noisy_signals = (self.noisy_signals - self.__mean) / self.__std
+
+        self.noisy_signals = self.noisy_signals.transpose(
+            0, 2, 1
+        )  # (num_samples, 2, window_size)
+        self.clean_signals = self.clean_signals.transpose(
+            0, 2, 1
+        )  # (num_samples, 2, window_size)
+
         # print(f"Loaded {split} dataset with {len(self.indices)} samples")
+
+    def get_stats(self):
+        return torch.FloatTensor(self.__mean), torch.FloatTensor(self.__std)
 
     def __len__(self):
         return len(self.indices)

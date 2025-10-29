@@ -56,6 +56,9 @@ class ECGDenoisingExperiment:
             snr_db=self.args.snr_db,
             split_dir=self.args.split_dir,
         )
+        self.mean, self.std = dataset.get_stats()
+        self.mean = self.mean.to(self.accelerator.device)
+        self.std = self.std.to(self.accelerator.device)
         dataloader = DataLoader(
             dataset,
             batch_size=self.args.batch_size,
@@ -235,7 +238,7 @@ class ECGDenoisingExperiment:
                 )
 
                 outputs = model(x)
-                metrics_res = compute_metrics(outputs, label)
+                metrics_res = compute_metrics(outputs, label, self.mean, self.std)
                 for key in metrics:
                     metrics[key].append(metrics_res[key])
 
