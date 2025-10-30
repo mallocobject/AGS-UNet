@@ -23,6 +23,8 @@ from utils import compute_metrics
 from datasets import ECGDataset
 from models import *
 
+set_seed(42)
+
 
 class ECGDenoisingExperiment:
     def __init__(self, args: argparse.Namespace):
@@ -36,15 +38,13 @@ class ECGDenoisingExperiment:
             "ACDAE": ACDAE,
             "Seq2Seq2": Seq2Seq2,
             "ralenet": ralenet,
-            "DTUNet": DTUNet,
+            "AGSUNet": AGSUNet,
         }
 
         self.checkpoint = os.path.join(
             self.args.checkpoint_dir,
             f"best_{self.args.model}_{self.args.noise_type}_snr_{self.args.snr_db}.pth",
         )
-
-        set_seed(self.args.seed)
 
     def _build_model(self):
         if self.args.model not in self.model_dict:
@@ -258,5 +258,5 @@ class ECGDenoisingExperiment:
 
             self.accelerator.print("🚀 Test Results:")
             self.accelerator.print(
-                f"RMSE: {metrics['RMSE']:.2f}, SNR: {metrics['SNR']:.2f}"
+                f"RMSE: {metrics['RMSE']:.4f}, SNR: {metrics['SNR']:.4f}"
             )

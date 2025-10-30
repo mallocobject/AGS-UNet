@@ -24,7 +24,7 @@ def parse_args():
         "--model",
         type=str,
         default="UNet",
-        choices=["UNet", "ACDAE", "Seq2Seq2", "ralenet", "DTUNet"],
+        choices=["UNet", "ACDAE", "Seq2Seq2", "ralenet", "AGSUNet"],
     )
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=100)

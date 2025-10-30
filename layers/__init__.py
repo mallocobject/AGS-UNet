@@ -10,4 +10,4 @@ from .diff_trans import (
     CrossTransformerLayer,
     DiffCrossTransformerLayer,
 )
-from .AG import AttentionGate1D
+from .attn_gate import AttentionGate1D
