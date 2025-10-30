@@ -33,6 +33,9 @@ def parse_args():
         "--noise_type", type=str, default="emb", choices=["bw", "em", "ma", "emb"]
     )
     parser.add_argument("--snr_db", type=int, default=0, choices=[-4, -2, 0, 2, 4])
+    parser.add_argument(
+        "--seed", type=int, default=3407, help="seed(3407) is all you need"
+    )
 
     # ====== 模型保存与加载 ======
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints/")

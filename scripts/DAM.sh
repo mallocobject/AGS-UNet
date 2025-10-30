@@ -1,10 +1,12 @@
 accelerate launch --config_file ./config.yaml run.py \
     --split_dir ./data_split \
     --model Seq2Seq2 \
-    --batch_size 32 \
+    --batch_size 64 \
     --epochs 100 \
     --lr 1e-3 \
     --noise_type emb \
-    --snr_db -4 \
+    --snr_db 4 \
+    --seed 3407 \
     --checkpoint_dir ./checkpoints \
     --mode train \
+    

@@ -10,6 +10,7 @@ import numpy as np
 import time
 import warnings
 from tqdm import TqdmExperimentalWarning
+from accelerate.utils import set_seed
 
 warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
 
@@ -42,6 +43,8 @@ class ECGDenoisingExperiment:
             self.args.checkpoint_dir,
             f"best_{self.args.model}_{self.args.noise_type}_snr_{self.args.snr_db}.pth",
         )
+
+        set_seed(self.args.seed)
 
     def _build_model(self):
         if self.args.model not in self.model_dict:
@@ -90,10 +93,10 @@ class ECGDenoisingExperiment:
             else:
                 return 0.1
 
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.args.epochs, eta_min=1e-5
-        )
-        # scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+        # scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        #     optimizer, T_max=self.args.epochs, eta_min=1e-5
+        # )
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
         return scheduler
 
     def train(self):
