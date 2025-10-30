@@ -2,15 +2,15 @@ import torch
 
 
 def compute_metrics(
-    denoised: torch.Tensor, clean: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
+    denoised: torch.Tensor,
+    clean: torch.Tensor,
+    mean: torch.Tensor | None = None,
+    std: torch.Tensor | None = None,
 ) -> dict:
     """
     计算 ECG 信号去噪指标：
     RMSE、PRD、SNR(batch 维度求平均)
     """
-
-    mean = mean.permute(0, 2, 1)  # (1, C, 1)
-    std = std.permute(0, 2, 1)  # (1, C, 1)
 
     # === 保证形状匹配 ===
     # 输入通常是 (batch, channels, length)
@@ -18,8 +18,11 @@ def compute_metrics(
         clean = clean.unsqueeze(1)
         denoised = denoised.unsqueeze(1)
 
-    # 反标准化
-    denoised = denoised * std + mean
+    if mean is not None and std is not None:
+        # 反标准化
+        mean = mean.permute(0, 2, 1)  # (1, C, 1)
+        std = std.permute(0, 2, 1)  # (1, C, 1)
+        denoised = denoised * std + mean
 
     # 保证浮点精度（避免半精度误差）
     clean = clean.float()
