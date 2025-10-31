@@ -1,6 +1,6 @@
 accelerate launch --config_file ./config.yaml run.py \
     --split_dir ./data_split \
-    --model Seq2Seq2 \
+    --model DACNN \
     --batch_size 64 \
     --epochs 100 \
     --lr 1e-3 \

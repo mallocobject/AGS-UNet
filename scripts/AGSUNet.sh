@@ -1,6 +1,6 @@
 accelerate launch --config_file ./config.yaml run.py \
     --split_dir ./data_split \
-    --model AGSUNet \
+    --model AGS-UNet \
     --batch_size 64 \
     --epochs 100 \
     --lr 1e-3 \

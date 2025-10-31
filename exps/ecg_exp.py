@@ -34,11 +34,11 @@ class ECGDenoisingExperiment:
         self.accelerator = Accelerator()
 
         self.model_dict = {
-            "UNet": UNet,
+            "U-Net": UNet,
             "ACDAE": ACDAE,
-            "Seq2Seq2": Seq2Seq2,
-            "ralenet": ralenet,
-            "AGSUNet": AGSUNet,
+            "DACNN": Seq2Seq2,
+            "RALENet": ralenet,
+            "AGS-UNet": AGSUNet,
         }
 
         self.checkpoint = os.path.join(
